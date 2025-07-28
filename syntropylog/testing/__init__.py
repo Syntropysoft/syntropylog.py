@@ -1,42 +1,47 @@
 """
-Testing Utilities for SyntropyLog
+Testing Framework for SyntropyLog
 
-This module provides framework-agnostic testing utilities including mocks
-and test helpers for SyntropyLog components.
+This module provides testing utilities and mocks for framework-agnostic testing.
 """
 
-# Placeholder for testing utility classes
-# These will be implemented in separate files
+from typing import Any, Callable
 
-def create_test_helper(spy_fn):
-    """Create a test helper with framework-agnostic spy injection."""
-    pass
+
+def create_test_helper(spy_fn: Callable) -> Any:
+    """Create test helper (placeholder)."""
+    return None
+
 
 class SyntropyLogMock:
-    """Mock for the main SyntropyLog framework."""
-    pass
+    """Mock SyntropyLog instance (placeholder)."""
+    
+    def __init__(self):
+        pass
+
 
 class BeaconRedisMock:
-    """Mock for BeaconRedis client."""
-    pass
+    """Mock BeaconRedis instance (placeholder)."""
+    
+    def __init__(self):
+        pass
+
 
 class MockHttpClient:
-    """Mock for HTTP client instrumentation."""
-    pass
+    """Mock HTTP client (placeholder)."""
+    
+    def __init__(self):
+        pass
+
 
 class MockBrokerAdapter:
-    """Mock for message broker adapters."""
-    pass
+    """Mock broker adapter (placeholder)."""
+    
+    def __init__(self):
+        pass
+
 
 class MockSerializerRegistry:
-    """Mock for serializer registry."""
-    pass
-
-__all__ = [
-    'create_test_helper',
-    'SyntropyLogMock',
-    'BeaconRedisMock',
-    'MockHttpClient',
-    'MockBrokerAdapter',
-    'MockSerializerRegistry'
-] 
+    """Mock serializer registry (placeholder)."""
+    
+    def __init__(self):
+        pass 

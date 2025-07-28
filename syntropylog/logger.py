@@ -1,301 +1,258 @@
 """
-Logger System for SyntropyLog
+Ultra-Optimized Logger System for SyntropyLog
 
-This module provides the core logging functionality with structured logging,
-automatic context propagation, and multiple transport support.
+This module provides the core logging functionality with extreme performance
+optimization for log collectors. Designed for maximum throughput with minimal overhead.
 """
 
 import asyncio
-import logging
+import json
+import time
 from typing import Dict, Any, Optional, List
-from datetime import datetime
 from enum import Enum
-
-from .context import ContextManager
+from dataclasses import dataclass, field
+from collections import deque
+import threading
 
 
 class LogLevel(Enum):
-    """Log levels enumeration."""
+    """Log levels enumeration - optimized for speed."""
     DEBUG = "debug"
     INFO = "info"
     WARN = "warn"
     ERROR = "error"
 
 
-class Transport:
-    """
-    Base transport class for log output.
+@dataclass(frozen=True, slots=True)
+class LogEntry:
+    """Ultra-optimized log entry using slots for minimal memory overhead."""
+    level: str
+    message: str
+    timestamp: int
+    context: Dict[str, Any] = field(default_factory=dict)
     
-    This is the base class for all log transports. Transports are responsible
-    for delivering log entries to their final destination (console, file, etc.).
-    
-    The transport follows the "Silent Observer" philosophy - transport failures
-    are reported but don't interrupt the logging pipeline.
+    def to_json(self) -> str:
+        """Direct JSON serialization for maximum speed."""
+        return json.dumps({
+            'level': self.level,
+            'message': self.message,
+            'timestamp': self.timestamp,
+            'context': self.context
+        }, separators=(',', ':'), ensure_ascii=False)
+
+
+class UltraFastTransport:
     """
+    Ultra-optimized transport base class.
+    
+    Uses slots and minimal overhead for maximum performance.
+    """
+    
+    __slots__ = ('name', 'enabled', '_queue', '_worker_task')
     
     def __init__(self, name: str):
-        """
-        Initialize the transport.
-        
-        Args:
-            name: Transport name for identification
-        """
         self.name = name
         self.enabled = True
+        self._queue: deque = deque(maxlen=10000)  # Prevent memory leaks
+        self._worker_task: Optional[asyncio.Task] = None
     
-    async def send(self, entry: Dict[str, Any]) -> None:
+    async def _start_worker(self):
+        """Start async worker for non-blocking operations."""
+        if self._worker_task is None:
+            self._worker_task = asyncio.create_task(self._worker())
+    
+    async def _worker(self):
+        """Background worker for processing log entries."""
+        while self.enabled:
+            try:
+                if self._queue:
+                    entry = self._queue.popleft()
+                    await self._send_impl(entry)
+                else:
+                    await asyncio.sleep(0.001)  # 1ms sleep for efficiency
+            except Exception:
+                # Silent observer - continue processing
+                continue
+    
+    async def _send_impl(self, entry: LogEntry) -> None:
+        """Implementation method to be overridden by subclasses."""
+        raise NotImplementedError
+    
+    async def send(self, entry: LogEntry) -> None:
         """
-        Send a log entry to the transport destination.
-        
-        This method must be implemented by subclasses to handle the actual
-        delivery of log entries.
+        Send log entry asynchronously - fire and forget.
         
         Args:
-            entry: Log entry dictionary to send
+            entry: Log entry to send
         """
-        raise NotImplementedError("Subclasses must implement send()")
+        if not self.enabled:
+            return
+            
+        # Add to queue for async processing
+        self._queue.append(entry)
+        await self._start_worker()
     
     async def shutdown(self) -> None:
-        """
-        Shutdown the transport and cleanup resources.
-        
-        This method should be implemented by subclasses to perform any
-        necessary cleanup when the transport is being shut down.
-        """
-        pass
+        """Shutdown transport gracefully."""
+        self.enabled = False
+        if self._worker_task:
+            self._worker_task.cancel()
+            try:
+                await self._worker_task
+            except asyncio.CancelledError:
+                pass
 
 
-class ConsoleTransport(Transport):
+class ConsoleTransport(UltraFastTransport):
     """
-    Console transport for log output.
+    Ultra-fast console transport optimized for log collectors.
     
-    This transport outputs log entries to the console (stdout/stderr)
-    with formatted output.
+    Outputs pure JSON for maximum parsing speed.
     """
     
-    def __init__(self, name: str = "console", format_string: str = None):
-        """
-        Initialize the console transport.
-        
-        Args:
-            name: Transport name
-            format_string: Custom format string for log output
-        """
+    __slots__ = ('_lock',)
+    
+    def __init__(self, name: str = "console"):
         super().__init__(name)
-        self.format_string = format_string or "{timestamp} [{level}] {message} {context}"
+        self._lock = threading.Lock()
     
-    async def send(self, entry: Dict[str, Any]) -> None:
+    async def _send_impl(self, entry: LogEntry) -> None:
         """
-        Send log entry to console.
+        Send log entry to console as pure JSON.
         
         Args:
             entry: Log entry to output
         """
         try:
-            formatted = self.format_string.format(**entry)
-            print(formatted)
-        except Exception as error:
+            # Direct JSON output for maximum speed
+            json_line = entry.to_json()
+            
+            # Thread-safe print for concurrent access
+            with self._lock:
+                print(json_line, flush=True)
+                
+        except Exception:
             # Silent observer - don't interrupt logging pipeline
-            print(f"Console transport error: {error}")
+            pass
 
 
-class Logger:
+class UltraFastLogger:
     """
-    Main logger class for SyntropyLog.
+    Ultra-optimized logger for maximum performance.
     
-    This class provides structured logging with automatic context propagation,
-    multiple transport support, and level filtering.
-    
-    The logger follows the "Silent Observer" philosophy - logging failures
-    are reported but don't interrupt the main application flow.
-    
-    Attributes:
-        _context: Context manager for correlation IDs
-        _transports: List of configured transports
-        _level: Current log level
-        _formatters: Log formatters
-        _enabled: Whether logging is enabled
+    Uses slots, async operations, and minimal overhead for extreme throughput.
     """
     
-    def __init__(self, context: ContextManager, transports: List[Transport] = None):
-        """
-        Initialize the logger.
-        
-        Args:
-            context: Context manager for correlation
-            transports: List of transports to use
-        """
-        self._context = context
-        self._transports = transports or []
-        self._level = LogLevel.INFO
-        self._formatters = {}
+    __slots__ = ('_level', '_transports', '_context', '_enabled')
+    
+    def __init__(self, level: LogLevel = LogLevel.INFO):
+        self._level = level
+        self._transports: List[UltraFastTransport] = []
+        self._context: Dict[str, Any] = {}
         self._enabled = True
-        
-        # Initialize internal logger for framework operations
-        self._internal_logger = logging.getLogger('syntropylog.logger')
-        self._internal_logger.setLevel(logging.WARNING)
     
-    def set_level(self, level: str) -> None:
-        """
-        Set the log level.
-        
-        Args:
-            level: Log level ('debug', 'info', 'warn', 'error')
-        """
-        try:
-            self._level = LogLevel(level.lower())
-        except ValueError:
-            self._internal_logger.warning(f"Invalid log level: {level}")
+    def set_level(self, level: LogLevel) -> None:
+        """Set log level."""
+        self._level = level
     
-    def add_transport(self, transport: Transport) -> None:
-        """
-        Add a transport to the logger.
-        
-        Args:
-            transport: Transport instance to add
-        """
+    def add_transport(self, transport: UltraFastTransport) -> None:
+        """Add transport."""
         self._transports.append(transport)
     
-    def remove_transport(self, name: str) -> None:
-        """
-        Remove a transport by name.
-        
-        Args:
-            name: Name of transport to remove
-        """
-        self._transports = [t for t in self._transports if t.name != name]
+    def add_context(self, key: str, value: Any) -> None:
+        """Add context data."""
+        self._context[key] = value
     
     def _should_log(self, level: LogLevel) -> bool:
-        """
-        Check if a log level should be processed.
-        
-        Args:
-            level: Log level to check
+        """Check if level should be logged."""
+        if not self._enabled:
+            return False
             
-        Returns:
-            True if the level should be logged
-        """
         level_order = {
             LogLevel.DEBUG: 0,
             LogLevel.INFO: 1,
             LogLevel.WARN: 2,
             LogLevel.ERROR: 3
         }
+        
         return level_order[level] >= level_order[self._level]
     
-    def _create_entry(self, level: LogLevel, message: str, **kwargs: Any) -> Dict[str, Any]:
-        """
-        Create a log entry with context and metadata.
+    def _create_entry(self, level: LogLevel, message: str, **kwargs: Any) -> LogEntry:
+        """Create log entry with minimal overhead and context filtering."""
+        # Get filtered context from context manager if available
+        filtered_context = {}
         
-        Args:
-            level: Log level
-            message: Log message
-            **kwargs: Additional log data
-            
-        Returns:
-            Complete log entry dictionary
-        """
-        entry = {
-            'timestamp': datetime.utcnow().isoformat(),
-            'level': level.value,
-            'message': message,
-            'data': kwargs
-        }
+        # Try to get filtered context from global context manager
+        try:
+            from . import syntropy_log
+            if syntropy_log.context and syntropy_log.context.is_initialized:
+                filtered_context = syntropy_log.context.get_filtered_context(level.value)
+        except Exception:
+            # Fallback to local context if global context is not available
+            filtered_context = self._context.copy()
         
-        # Add context data if available
-        if self._context:
-            correlation_id = self._context.get_correlation_id()
-            if correlation_id:
-                entry['correlation_id'] = correlation_id
-            
-            context_data = self._context.get_context_data()
-            if context_data:
-                entry['context'] = context_data
+        # Merge filtered context with additional kwargs
+        context = {**filtered_context, **kwargs}
         
-        return entry
+        # Apply masking to sensitive data if masking engine is available
+        try:
+            from . import syntropy_log
+            if syntropy_log.masking and syntropy_log.masking.is_initialized:
+                context = syntropy_log.masking.mask_data(context)
+        except Exception:
+            # Silent observer - continue without masking if it fails
+            pass
+        
+        # Use time.time() for maximum speed (no datetime overhead)
+        timestamp = int(time.time() * 1000)  # milliseconds
+        
+        return LogEntry(
+            level=level.value,
+            message=message,
+            timestamp=timestamp,
+            context=context
+        )
     
-    async def _send_to_transports(self, entry: Dict[str, Any]) -> None:
-        """
-        Send log entry to all enabled transports.
-        
-        Args:
-            entry: Log entry to send
-        """
+    async def _send_to_transports(self, entry: LogEntry) -> None:
+        """Send entry to all transports asynchronously."""
+        if not self._transports:
+            return
+            
+        # Fire and forget - don't await
         for transport in self._transports:
-            if transport.enabled:
-                try:
-                    await transport.send(entry)
-                except Exception as error:
-                    # Silent observer - report but don't interrupt
-                    self._internal_logger.error(f"Transport {transport.name} failed: {error}")
+            asyncio.create_task(transport.send(entry))
     
     def debug(self, message: str, **kwargs: Any) -> None:
-        """
-        Log a debug message.
-        
-        Args:
-            message: Debug message
-            **kwargs: Additional debug data
-        """
+        """Log debug message."""
         if self._should_log(LogLevel.DEBUG):
             entry = self._create_entry(LogLevel.DEBUG, message, **kwargs)
             asyncio.create_task(self._send_to_transports(entry))
     
     def info(self, message: str, **kwargs: Any) -> None:
-        """
-        Log an info message.
-        
-        Args:
-            message: Info message
-            **kwargs: Additional info data
-        """
+        """Log info message."""
         if self._should_log(LogLevel.INFO):
             entry = self._create_entry(LogLevel.INFO, message, **kwargs)
             asyncio.create_task(self._send_to_transports(entry))
     
     def warn(self, message: str, **kwargs: Any) -> None:
-        """
-        Log a warning message.
-        
-        Args:
-            message: Warning message
-            **kwargs: Additional warning data
-        """
+        """Log warning message."""
         if self._should_log(LogLevel.WARN):
             entry = self._create_entry(LogLevel.WARN, message, **kwargs)
             asyncio.create_task(self._send_to_transports(entry))
     
     def error(self, message: str, **kwargs: Any) -> None:
-        """
-        Log an error message.
-        
-        Args:
-            message: Error message
-            **kwargs: Additional error data
-        """
+        """Log error message."""
         if self._should_log(LogLevel.ERROR):
             entry = self._create_entry(LogLevel.ERROR, message, **kwargs)
             asyncio.create_task(self._send_to_transports(entry))
     
     async def shutdown(self) -> None:
-        """
-        Shutdown the logger and all transports.
+        """Shutdown logger gracefully."""
+        self._enabled = False
         
-        This method ensures that all transports are properly shut down
-        and any pending log entries are flushed.
-        """
-        try:
-            # Shutdown all transports
-            for transport in self._transports:
-                try:
-                    await transport.shutdown()
-                except Exception as error:
-                    self._internal_logger.error(f"Transport {transport.name} shutdown failed: {error}")
-            
-            self._enabled = False
-            
-        except Exception as error:
-            self._internal_logger.error(f"Logger shutdown failed: {error}")
+        # Shutdown all transports
+        for transport in self._transports:
+            await transport.shutdown()
     
     @property
     def level(self) -> LogLevel:
@@ -303,82 +260,36 @@ class Logger:
         return self._level
     
     @property
-    def transports(self) -> List[Transport]:
-        """Get list of configured transports."""
+    def transports(self) -> List[UltraFastTransport]:
+        """Get transports list."""
         return self._transports.copy()
     
     @property
     def is_enabled(self) -> bool:
-        """Check if logging is enabled."""
+        """Check if logger is enabled."""
         return self._enabled
 
 
 class LoggerFactory:
     """
-    Factory for creating logger instances.
-    
-    This class provides a factory pattern for creating logger instances
-    with different configurations and transports.
+    Factory for creating ultra-optimized loggers.
     """
     
-    def __init__(self):
-        """Initialize the logger factory."""
-        self._default_transports = {
-            'console': ConsoleTransport
-        }
-    
-    async def create_logger(self, config: Dict[str, Any], context: ContextManager) -> Logger:
+    @staticmethod
+    async def create_logger(level: LogLevel = LogLevel.INFO) -> UltraFastLogger:
         """
-        Create a logger instance with the specified configuration.
+        Create ultra-fast logger with console transport.
         
         Args:
-            config: Logger configuration
-            context: Context manager for correlation
+            level: Initial log level
             
         Returns:
             Configured logger instance
         """
-        # Create logger instance
-        logger = Logger(context)
+        logger = UltraFastLogger(level)
         
-        # Set log level
-        if 'level' in config:
-            logger.set_level(config['level'])
+        # Add default console transport
+        console_transport = ConsoleTransport()
+        logger.add_transport(console_transport)
         
-        # Add transports
-        transports = config.get('transports', ['console'])
-        for transport_name in transports:
-            transport = await self._create_transport(transport_name, config)
-            if transport:
-                logger.add_transport(transport)
-        
-        return logger
-    
-    async def _create_transport(self, name: str, config: Dict[str, Any]) -> Optional[Transport]:
-        """
-        Create a transport instance by name.
-        
-        Args:
-            name: Transport name
-            config: Transport configuration
-            
-        Returns:
-            Transport instance or None if creation fails
-        """
-        try:
-            if name == 'console':
-                format_string = config.get('formatters', {}).get('console', None)
-                return ConsoleTransport('console', format_string)
-            
-            # Add more transport types here as they are implemented
-            # elif name == 'file':
-            #     return FileTransport(...)
-            # elif name == 'http':
-            #     return HttpTransport(...)
-            
-            return None
-            
-        except Exception as error:
-            # Silent observer - don't interrupt logger creation
-            print(f"Failed to create transport {name}: {error}")
-            return None 
+        return logger 

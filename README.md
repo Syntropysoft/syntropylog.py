@@ -1,5 +1,30 @@
 # SyntropyLog Python
 
+<p align="center">
+  <img src="./assets/syntropysoft-logo.png" alt="SyntropySoft Logo" width="170"/>
+</p>
+
+<h1 align="center">SyntropyLog Python</h1>
+
+<p align="center">
+  <strong>From Chaos to Clarity</strong>
+  <br />
+  The Observability Framework for High-Performance Python Applications
+</p>
+
+<p align="center">
+  <a href="#"><img src="https://img.shields.io/badge/status-alpha-orange.svg" alt="Alpha"></a>
+  <a href="https://github.com/Syntropysoft/SyntropyLog/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg" alt="License"></a>
+  <a href="#"><img src="https://img.shields.io/badge/python-3.7+-blue.svg" alt="Python 3.7+"></a>
+  <a href="#"><img src="https://img.shields.io/badge/async-await-green.svg" alt="Async/Await"></a>
+</p>
+
+---
+
+🚀 **Ultra-fast observability framework with automatic correlation - Just 1 line of code!**
+
+SyntropyLog Python provides comprehensive observability for your Python applications with automatic context propagation, correlation IDs, and ultra-fast logging performance.
+
 ## 🎯 Propósito
 
 SyntropyLog Python es la implementación en Python del framework de observabilidad SyntropyLog, manteniendo la misma filosofía y patrones del framework Node.js.
