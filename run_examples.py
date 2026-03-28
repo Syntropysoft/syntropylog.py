@@ -25,6 +25,7 @@ EXAMPLES = [
     ("05_with_meta_and_audit",   "with_meta() and audit level"),
     ("06_fastapi_middleware",    "FastAPI/ASGI middleware"),       # skipped if no fastapi
     ("07_pretty_console",        "PrettyConsoleTransport"),
+    ("08_adapter_transport",     "AdapterTransport + UniversalAdapter"),
 ]
 
 SKIP_OUTPUT = True   # suppress example stdout during run

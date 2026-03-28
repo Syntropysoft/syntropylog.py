@@ -3,12 +3,17 @@ Transport layer for slpy.
 
 Transports are synchronous — the hot path never spawns background tasks.
 Extend Transport and implement log() to route entries to any destination.
+
+For async destinations (databases, HTTP APIs) use AdapterTransport +
+UniversalAdapter — provide an executor function and slpy handles the rest.
 """
 
+import asyncio
 import datetime
+import inspect
 import json
 import sys
-from typing import Any, Dict
+from typing import Any, Callable, Dict, Optional
 
 # ---------------------------------------------------------------------------
 # ANSI codes — no external dependencies
@@ -139,3 +144,75 @@ class PrettyConsoleTransport(Transport):
             f"{message}"
             f"{_DIM}{tail}{_RESET}"
         )
+
+
+class UniversalAdapter:
+    """
+    Wraps an executor function — sync or async — that receives the log entry
+    and routes it anywhere: database, HTTP API, queue, multiple destinations.
+
+    The executor is the only thing you write. slpy handles context, masking,
+    formatting, and error isolation.
+
+    Usage:
+        adapter = UniversalAdapter(
+            executor=async def my_executor(data):
+                await asyncio.gather(
+                    prisma.system_log.create(data=data),
+                    es_client.index(index='logs', body=data),
+                )
+        )
+    """
+
+    def __init__(self, executor: Callable[[Dict[str, Any]], Any]) -> None:
+        self._executor = executor
+        self._is_async = inspect.iscoroutinefunction(executor)
+
+    def execute(self, data: Dict[str, Any]) -> None:
+        if self._is_async:
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(self._executor(data))
+            except RuntimeError:
+                asyncio.run(self._executor(data))
+        else:
+            self._executor(data)
+
+
+class AdapterTransport(Transport):
+    """
+    Transport that delegates to a UniversalAdapter.
+
+    Optionally applies a formatter to transform the entry before passing it
+    to the executor — useful for mapping slpy fields to your DB schema.
+
+    Usage:
+        db_transport = AdapterTransport(
+            name='db',
+            adapter=UniversalAdapter(executor=my_executor),
+            formatter=lambda e: {**e, 'ts': datetime.fromisoformat(e['timestamp'])},
+        )
+
+        await slpy.init({
+            'logger': {
+                'transports': [db_transport, ConsoleTransport()],
+            },
+        })
+    """
+
+    def __init__(
+        self,
+        name: str,
+        adapter: UniversalAdapter,
+        formatter: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None,
+    ) -> None:
+        self._name = name
+        self._adapter = adapter
+        self._formatter = formatter
+
+    def log(self, entry: Dict[str, Any]) -> None:
+        try:
+            data = self._formatter(entry) if self._formatter else entry
+            self._adapter.execute(data)
+        except Exception:
+            pass  # Silent observer — never interrupt the application
