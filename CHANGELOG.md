@@ -72,6 +72,12 @@ rebuilt from scratch for Python idioms.
 ### Transports
 
 - **`ConsoleTransport`** — structured JSON to stdout. Default when no transport is configured.
+- **`PrettyConsoleTransport`** — human-readable colored output for development. Zero external
+  dependencies — pure ANSI codes. Auto-detects TTY: falls back to JSON automatically when stdout
+  is not a terminal (CI, pipes, production). Colors per level: debug=dim grey, info=green,
+  warn=yellow, error=red, audit=cyan. Format: `HH:MM:SS.mmm  LEVEL  service  message  key=value`.
+  Masking remains active — sensitive fields are masked in pretty output too.
+  `colors=True/False` to force on/off; default=auto-detect.
 - **`Transport` base class** — implement `log(entry: dict)` to route entries anywhere.
 - Multiple transports supported — entries are sent to all of them.
 

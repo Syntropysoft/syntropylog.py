@@ -248,7 +248,49 @@ sl.set_level('error')   # back to quiet
 
 ---
 
-## Custom transports
+## Transports
+
+| Transport | Output | Use case |
+|-----------|--------|----------|
+| `ConsoleTransport` | Structured JSON | Production, CI, log collectors — **default** |
+| `PrettyConsoleTransport` | Colored human-readable | Local development |
+
+### PrettyConsoleTransport
+
+Human-readable colored output. Zero external dependencies — pure ANSI codes.
+
+```python
+from slpy import slpy, PrettyConsoleTransport
+
+await slpy.init({
+    'logger': {
+        'level': 'debug',
+        'transports': [PrettyConsoleTransport()],
+    },
+})
+```
+
+```
+12:00:00.123  DEBUG  payment-service     Starting up          version=0.1.0
+12:00:00.124  INFO   payment-service     Service ready        port=8080
+12:00:00.124  WARN   payment-service     High memory usage    heap_mb=420
+12:00:00.124  ERROR  payment-service     Connection refused   host=db.internal
+12:00:00.124  INFO   payment-service     User login           email=j**n@example.com
+12:00:00.124  AUDIT  payment-service     Data exported        meta={"regulation":"GDPR"}
+```
+
+**Auto-detects TTY** — when stdout is not a terminal (CI, pipes, production), falls back to JSON
+automatically. No code change needed between environments.
+
+Masking remains active in pretty output — sensitive fields are masked regardless of transport.
+
+```python
+PrettyConsoleTransport()            # auto-detect TTY (recommended)
+PrettyConsoleTransport(colors=True) # force colors on
+PrettyConsoleTransport(colors=False)# force JSON (same as ConsoleTransport)
+```
+
+### Custom transports
 
 Extend `Transport` and implement `log(entry)` to route entries anywhere.
 
@@ -369,6 +411,9 @@ py examples/05_with_meta_and_audit.py
 
 # FastAPI middleware (requires: pip install fastapi uvicorn)
 uvicorn examples.06_fastapi_middleware:app --reload
+
+# PrettyConsoleTransport — colored output (run in a real terminal)
+py examples/07_pretty_console.py
 ```
 
 ## Running the tests
