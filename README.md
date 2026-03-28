@@ -269,18 +269,19 @@ Application code never sees wire names. It only works with conceptual names.
 
 ### Configuration
 
+`propagation` is a plain dictionary — the conceptual names shown below are just examples. You can use any names you want. The only rule is that the same conceptual name must appear in both `propagation` and `targets` so the framework knows which field to translate.
+
 ```python
 await slpy.init({
     'context': {
-        # Conceptual name -> wire name (used for both inbound and outbound HTTP)
+        # Any conceptual name you choose -> wire name for HTTP (inbound + outbound)
         'propagation': {
-            'correlation_id': 'X-Correlation-ID',
-            'trace_id':       'X-Trace-ID',
-            'session_id':     'X-Session-ID',
-            'transaction_id': 'X-Transaction-ID',
+            'correlation_id': 'X-Correlation-ID',   # example — use any name
+            'trace_id':       'X-Trace-ID',          # example
+            'tenant_id':      'X-Tenant-ID',         # your own field
+            'request_id':     'X-Request-ID',        # your own field
         },
-        # Per-destination wire names — each protocol has its own naming convention.
-        # Key = conceptual name, value = wire name for that destination.
+        # Same conceptual names, different wire names per destination
         'targets': {
             'kafka': {'correlation_id': 'correlationId', 'trace_id': 'traceId'},
             's3':    {'correlation_id': 'Correlation_ID'},
@@ -290,7 +291,7 @@ await slpy.init({
 })
 ```
 
-The `propagation` defaults are already included — only override what you need to change. `targets` is empty by default.
+The four defaults (`correlation_id`, `trace_id`, `session_id`, `transaction_id`) are pre-configured — you only declare what you need to add or change. `targets` is empty by default.
 
 ### Usage
 
