@@ -64,7 +64,7 @@ The `request_id` propagated automatically. The `email` was masked automatically.
 ## Quick start
 
 ```bash
-pip install slpy
+pip install slpy-log
 ```
 
 ```python
@@ -215,7 +215,7 @@ logger.audit('visible')  # always emitted
 One line wires automatic context propagation into every request.
 
 ```bash
-pip install slpy[fastapi]
+pip install slpy-log[fastapi]
 ```
 
 ```python
@@ -545,13 +545,13 @@ It is the component that makes every log line correct, consistent, and safe befo
 
 ```bash
 # Core (zero dependencies)
-pip install slpy
+pip install slpy-log
 
 # With FastAPI middleware
-pip install slpy[fastapi]
+pip install slpy-log[fastapi]
 
 # Development
-pip install slpy[dev]
+pip install slpy-log[dev]
 ```
 
 Requires Python 3.7+.
@@ -595,7 +595,7 @@ py examples/09_observability.py
 ## Running the tests
 
 ```bash
-pip install slpy[dev]
+pip install slpy-log[dev]
 pytest
 ```
 
