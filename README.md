@@ -56,6 +56,8 @@ The `request_id` propagated automatically. The `email` was masked automatically.
 | Copying context into child functions | `logger.child(order_id='123')` | All bindings carried automatically on every subsequent call |
 | Routing compliance logs manually | `logger.with_meta({"regulation": "GDPR"})` | `meta` payload travels sanitized to all transports |
 | Writing a transport class per destination | `AdapterTransport(adapter=UniversalAdapter(executor=fn))` | Your executor receives the clean entry — connect to anything |
+| Manually building headers per destination | `context.targets: {kafka: {...}, s3: {...}}` | `get_propagation_headers("kafka")` returns the right key names |
+| Adding tracing calls before every outbound call | `observability: {transports: [...]}` | `OutboundEvent` emitted automatically on every `get_propagation_headers()` |
 
 ---
 
@@ -237,6 +239,126 @@ async def get_order(order_id: str):
 ```
 
 `SyntropyMiddleware` is pure ASGI — it works with FastAPI, Starlette, Litestar, and any ASGI server (uvicorn, hypercorn) without framework-specific dependencies.
+
+---
+
+## Propagation headers
+
+When your service calls another service, context must travel with the request. slpy builds the header dict automatically using the names each destination expects — you declare the mapping once, call one method everywhere.
+
+```python
+await slpy.init({
+    'context': {
+        # Default outbound: conceptual name -> HTTP header name
+        # (also used for inbound extraction in FastAPI middleware)
+        'propagation': {
+            'correlation_id': 'X-Correlation-ID',
+            'trace_id':       'X-Trace-ID',
+        },
+        # Per-destination key names — each target gets its own convention
+        'targets': {
+            'kafka': {'correlation_id': 'correlationId', 'trace_id': 'traceId'},
+            's3':    {'correlation_id': 'Correlation_ID'},
+            'azure': {'correlation_id': 'CorrelationID',  'trace_id': 'TraceID'},
+        },
+    },
+})
+```
+
+```python
+async with slpy.context(correlation_id='req-001', trace_id='trace-xyz'):
+
+    # HTTP — uses propagation header names
+    await httpx.get(url, headers=slpy.get_propagation_headers())
+    # → {'X-Correlation-ID': 'req-001', 'X-Trace-ID': 'trace-xyz'}
+
+    # Kafka — uses kafka target key names
+    await kafka.send(topic, headers=slpy.get_propagation_headers('kafka'))
+    # → {'correlationId': 'req-001', 'traceId': 'trace-xyz'}
+
+    # S3 — uses s3 target key names
+    await s3.put_object(Metadata=slpy.get_propagation_headers('s3'))
+    # → {'Correlation_ID': 'req-001'}
+
+    # Azure Service Bus — uses azure target key names
+    await bus.send(msg, properties=slpy.get_propagation_headers('azure'))
+    # → {'CorrelationID': 'req-001', 'TraceID': 'trace-xyz'}
+```
+
+One declaration. Any destination. No boilerplate per target.
+
+**Context accessors**
+
+```python
+slpy.get_correlation_id()               # → 'req-001'
+slpy.get_trace_id()                     # → 'trace-xyz'
+slpy.get_session_id()                   # → None (if not in context)
+slpy.get_transaction_id()               # → None
+slpy.get_propagation_header_name('correlation_id')  # → 'X-Correlation-ID'
+```
+
+---
+
+## Observability layer
+
+Every `get_propagation_headers()` call automatically emits an `OutboundEvent` — a trazability record of what context left the service, to which target, and when. **These are not logs.** They are a separate observability channel, never masked, routed to a dedicated set of transports.
+
+```python
+from slpy import slpy, ObservabilityTransport, OutboundEvent
+
+class DatadogAPMTransport(ObservabilityTransport):
+    def emit(self, event: OutboundEvent) -> None:
+        datadog.trace(
+            name='outbound',
+            resource=event.target,
+            span_id=event.trace_id,
+            meta=event.headers,
+        )
+
+await slpy.init({
+    'observability': {
+        'transports': [DatadogAPMTransport()],  # Jaeger, Zipkin, custom — anything
+    },
+})
+```
+
+`OutboundEvent` fields:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `target` | `str` | `"http"`, `"kafka"`, `"s3"`, `"azure"`, etc. |
+| `headers` | `dict` | Key/value pairs as they will be sent |
+| `correlation_id` | `str \| None` | From current context |
+| `trace_id` | `str \| None` | From current context |
+| `timestamp` | `int` | Epoch milliseconds |
+
+```python
+event.to_dict()
+# → {
+#     "event":          "outbound",
+#     "target":         "kafka",
+#     "headers":        {"correlationId": "req-001"},
+#     "correlation_id": "req-001",
+#     "trace_id":       "trace-xyz",
+#     "timestamp":      1714000000000
+#   }
+```
+
+**Fanout** — route to multiple backends simultaneously:
+
+```python
+'observability': {
+    'transports': [JaegerTransport(), ZipkinTransport(), CustomStoreTransport()],
+}
+```
+
+**Silent observer** — a broken transport never affects the application. The error is swallowed internally.
+
+**Disable entirely:**
+
+```python
+'observability': {'enabled': False}  # zero overhead, zero events
+```
 
 ---
 
@@ -465,6 +587,9 @@ py examples/07_pretty_console.py
 
 # AdapterTransport + UniversalAdapter — fanout to multiple destinations
 py examples/08_adapter_transport.py
+
+# Observability layer — outbound event tracing
+py examples/09_observability.py
 ```
 
 ## Running the tests

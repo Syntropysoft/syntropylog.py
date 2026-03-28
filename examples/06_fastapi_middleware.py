@@ -36,11 +36,15 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 app.add_middleware(SyntropyMiddleware)
 
-logger = slpy.get_logger('api')
+# Logger is obtained lazily — slpy.get_logger() requires init() to have run.
+# In FastAPI, initialization happens in lifespan, not at import time.
+def get_logger():
+    return slpy.get_logger('api')
 
 
 @app.get('/orders/{order_id}')
 async def get_order(order_id: str):
+    logger = get_logger()
     # correlation_id, method, path are already in context — no extra work needed
     logger.info('Fetching order', order_id=order_id)
 
@@ -53,7 +57,7 @@ async def get_order(order_id: str):
 
 @app.post('/orders')
 async def create_order(data: dict = None):
-    order_logger = logger.child(action='create-order')
+    order_logger = get_logger().child(action='create-order')
     order_logger.info('Creating order', payload=data)
     order_logger.audit('Order created', order_id='ORD-NEW', amount=299.90)
     return JSONResponse({'order_id': 'ORD-NEW', 'status': 'created'}, status_code=201)
@@ -61,5 +65,5 @@ async def create_order(data: dict = None):
 
 async def fetch_from_db(order_id: str) -> dict:
     # context_id and all context fields are still here — same contextvars scope
-    logger.debug('DB query', table='orders', order_id=order_id)
+    get_logger().debug('DB query', table='orders', order_id=order_id)
     return {'order_id': order_id}

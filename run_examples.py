@@ -4,7 +4,7 @@ Run all slpy examples and report pass/fail.
 Usage:
     py run_examples.py
 
-Runs all 8 examples from source without publishing the package.
+Runs all 9 examples from source without publishing the package.
 Examples that require extra dependencies (fastapi, uvicorn) are skipped
 automatically if those packages are not installed.
 """
@@ -27,6 +27,7 @@ EXAMPLES = [
     ("06_fastapi_middleware",    "FastAPI/ASGI middleware"),       # skipped if no fastapi
     ("07_pretty_console",        "PrettyConsoleTransport"),
     ("08_adapter_transport",     "AdapterTransport + UniversalAdapter"),
+    ("09_observability",         "Observability layer — outbound event tracing"),
 ]
 
 SKIP_OUTPUT = True   # suppress example stdout during run
