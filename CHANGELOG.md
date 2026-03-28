@@ -4,6 +4,85 @@ All notable changes to slpy are documented here.
 
 ---
 
+## [0.3.1] — 2026-03-28
+
+### Breaking changes
+
+- **`context.propagation` and `context.targets` moved under `context.outbound`.**
+  The flat structure from 0.3.0 is replaced by an explicit `inbound`/`outbound` split.
+
+  ```python
+  # Before (0.3.0)
+  await slpy.init({
+      'context': {
+          'propagation': {'correlation_id': 'X-Correlation-ID'},
+          'targets': {'kafka': {'correlation_id': 'correlationId'}},
+      }
+  })
+
+  # After (0.3.1)
+  await slpy.init({
+      'context': {
+          'inbound': {
+              'default': {'correlation_id': 'X-Correlation-ID'},
+          },
+          'outbound': {
+              'propagation': {'correlation_id': 'X-Correlation-ID'},
+              'targets': {'kafka': {'correlation_id': 'correlationId'}},
+          },
+      }
+  })
+  ```
+
+- **`SyntropyMiddleware` now requires a `source` parameter** (default: `"default"`).
+  The middleware reads inbound headers from `context.inbound[source]` instead of
+  `context.propagation`.
+
+  ```python
+  # Before (0.3.0)
+  app.add_middleware(SyntropyMiddleware)
+
+  # After (0.3.1) — explicit source
+  app.add_middleware(SyntropyMiddleware, source='frontend')
+  ```
+
+### New
+
+- **Multi-source inbound mapping.** `context.inbound` is a dict of sources — each source
+  declares its own header-name-to-field mapping. A BFF or API gateway that receives traffic
+  from multiple origins (frontend, partner API, legacy internal) can declare each source
+  separately with different wire names mapping to the same conceptual fields.
+
+  ```python
+  'context': {
+      'inbound': {
+          SOURCE_FRONTEND: {FIELD_CORRELATION: 'X-Correlation-ID'},
+          SOURCE_PARTNER:  {FIELD_CORRELATION: 'x-request-id'},
+          SOURCE_LEGACY:   {FIELD_CORRELATION: 'correlationid'},
+      },
+      'outbound': {
+          'propagation': {FIELD_CORRELATION: 'X-Correlation-ID'},
+      },
+  }
+  app.add_middleware(SyntropyMiddleware, source=SOURCE_FRONTEND)
+  ```
+
+### Philosophy
+
+The inbound/outbound split makes the data flow explicit:
+- **`context.inbound`** — what comes in, by source.
+- **`context.outbound`** — what goes out, by destination.
+
+Internal context is the translation layer between them. Application code only works with
+conceptual field names and never sees wire names directly.
+
+### Testing
+
+- 101 tests (was 99). Added `test_inbound_config` in `test_config.py`.
+- All tests updated for the new `inbound`/`outbound` config structure.
+
+---
+
 ## [0.3.0] — 2026-03-28
 
 ### Breaking changes

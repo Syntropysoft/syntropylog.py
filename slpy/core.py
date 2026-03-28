@@ -161,25 +161,22 @@ class SyntropyLog:
         self._require_initialized()
         ctx: Dict[str, Any] = self._context.get()
         result: Dict[str, str] = {}
+        outbound = self._config.context.outbound
 
         if target is None:
-            # Default — use HTTP header names from propagation config
-            for field_name, header_name in self._config.context.propagation.items():
+            for field_name, header_name in outbound.propagation.items():
                 value = ctx.get(field_name)
                 if value is not None:
                     result[header_name] = str(value)
         else:
-            # Target-specific — use key names from targets config
-            target_map: Dict[str, str] = self._config.context.targets.get(target, {})
-            # Fall back to propagation keys for fields not in target map
-            for field_name in self._config.context.propagation:
+            target_map: Dict[str, str] = outbound.targets.get(target, {})
+            for field_name in outbound.propagation:
                 value = ctx.get(field_name)
                 if value is not None:
                     key = target_map.get(field_name, field_name)
                     result[key] = str(value)
 
         # Emit outbound event — trazability of context leaving the service
-        ctx: Dict[str, Any] = self._context.get()
         self._observability.record(OutboundEvent(
             target=target or "http",
             headers=result,
@@ -211,7 +208,7 @@ class SyntropyLog:
             # → "X-B3-TraceId"  (if configured)
         """
         self._require_initialized()
-        return self._config.context.propagation.get(field_name)
+        return self._config.context.outbound.propagation.get(field_name)
 
     @property
     def is_initialized(self) -> bool:

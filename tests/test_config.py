@@ -9,7 +9,9 @@ def test_defaults():
     assert cfg.logger.level == "info"
     assert cfg.logger.transports == []
     assert cfg.masking.enable_default_rules is True
-    assert cfg.context.propagation == {}   # no built-in defaults — developer declares explicitly
+    assert cfg.context.inbound == {}          # no built-in defaults
+    assert cfg.context.outbound.propagation == {}
+    assert cfg.context.outbound.targets == {}
     assert cfg.context.custom_headers == []
 
 
@@ -44,15 +46,30 @@ def test_env_override(monkeypatch):
 def test_custom_propagation():
     cfg = ConfigManager({
         "context": {
-            "propagation": {
-                "correlation_id": "X-Request-ID",
-                "trace_id":       "X-B3-TraceId",
+            "outbound": {
+                "propagation": {
+                    "correlation_id": "X-Request-ID",
+                    "trace_id":       "X-B3-TraceId",
+                }
             }
         }
     })
-    assert cfg.context.propagation["correlation_id"] == "X-Request-ID"
-    assert cfg.context.propagation["trace_id"] == "X-B3-TraceId"
-    assert "session_id" not in cfg.context.propagation
+    assert cfg.context.outbound.propagation["correlation_id"] == "X-Request-ID"
+    assert cfg.context.outbound.propagation["trace_id"] == "X-B3-TraceId"
+    assert "session_id" not in cfg.context.outbound.propagation
+
+
+def test_inbound_config():
+    cfg = ConfigManager({
+        "context": {
+            "inbound": {
+                "frontend": {"correlation_id": "x-correlation-id"},
+                "partner":  {"correlation_id": "x-request-id"},
+            }
+        }
+    })
+    assert cfg.context.inbound["frontend"]["correlation_id"] == "x-correlation-id"
+    assert cfg.context.inbound["partner"]["correlation_id"] == "x-request-id"
 
 
 def test_custom_headers_config():

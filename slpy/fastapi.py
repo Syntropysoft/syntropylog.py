@@ -6,11 +6,11 @@ One line wires automatic context propagation into every request:
     from slpy.fastapi import SyntropyMiddleware
 
     app = FastAPI()
-    app.add_middleware(SyntropyMiddleware)
+    app.add_middleware(SyntropyMiddleware, source=SOURCE_FRONTEND)
 
-Every log emitted during a request automatically carries the fields
-declared in the 'context.propagation' config (correlation_id, trace_id,
-session_id, transaction_id) plus any custom_headers configured.
+The `source` parameter selects which inbound mapping to use — declared
+in context.inbound config. Each source can have different header names
+for the same conceptual fields.
 """
 
 import uuid
@@ -38,32 +38,40 @@ if _starlette_available:
         """
         ASGI middleware that opens a slpy context scope per request.
 
-        Reads headers defined in slpy.init() context.propagation config,
-        sets them in context under their conceptual names, and forwards
-        them in the response.
+        source — selects the inbound mapping declared in context.inbound.
+                 Defaults to 'default'. Use a constant for clarity:
 
-        No configuration needed here — everything is declared in init().
+                     app.add_middleware(SyntropyMiddleware, source=SOURCE_FRONTEND)
         """
+
+        def __init__(self, app: Any, source: str = "default") -> None:
+            super().__init__(app)
+            self._source = source
 
         async def dispatch(self, request: Request, call_next: Any) -> Response:
             from slpy import slpy  # late import to avoid circular dependency
 
-            propagation: Dict[str, str] = slpy._config.context.propagation
+            inbound_map: Dict[str, str] = (
+                slpy._config.context.inbound.get(self._source, {})
+            )
+            outbound_propagation: Dict[str, str] = (
+                slpy._config.context.outbound.propagation
+            )
             custom_headers = slpy._config.context.custom_headers
 
-            # Build context fields from propagation config
             ctx_fields: Dict[str, Any] = {}
             response_headers: Dict[str, str] = {}
 
-            for field_name, header_name in propagation.items():
+            for field_name, header_name in inbound_map.items():
                 value = request.headers.get(header_name)
                 if value is None and field_name == "correlation_id":
-                    value = str(uuid.uuid4())  # always generate if missing
+                    value = str(uuid.uuid4())
                 if value is not None:
                     ctx_fields[field_name] = value
-                    response_headers[header_name] = value
+                    # Forward using the outbound wire name if configured
+                    outbound_header = outbound_propagation.get(field_name, header_name)
+                    response_headers[outbound_header] = value
 
-            # Custom headers — stored as-is using normalized key
             for header_name in custom_headers:
                 value = request.headers.get(header_name)
                 if value is not None:

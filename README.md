@@ -223,11 +223,26 @@ from fastapi import FastAPI
 from slpy import slpy
 from slpy.fastapi import SyntropyMiddleware
 
+# Define your field and source constants once
+FIELD_CORRELATION = 'correlation_id'
+SOURCE_FRONTEND   = 'frontend'
+
+await slpy.init({
+    'context': {
+        'inbound': {
+            SOURCE_FRONTEND: {FIELD_CORRELATION: 'X-Correlation-ID'},
+        },
+        'outbound': {
+            'propagation': {FIELD_CORRELATION: 'X-Correlation-ID'},
+        },
+    },
+})
+
 app = FastAPI()
-app.add_middleware(SyntropyMiddleware)
+app.add_middleware(SyntropyMiddleware, source=SOURCE_FRONTEND)
 ```
 
-Every log emitted during a request automatically carries `correlation_id`, `method`, and `path` — extracted from the incoming header or generated if absent. The `X-Correlation-ID` header is forwarded in the response.
+Every log emitted during a request automatically carries `correlation_id`, `method`, and `path` — extracted from the incoming header or generated if absent. The correlation header is forwarded in the response using the outbound wire name.
 
 ```python
 @app.get('/orders/{order_id}')
@@ -251,12 +266,18 @@ async def get_order(order_id: str):
 The actual name that travels — the HTTP header, the Kafka key, the S3 metadata key — is declared by you in the configuration. The framework uses the conceptual names internally to read and write context, and translates them to the correct wire name for each destination at the moment of sending.
 
 ```
-internal context     inbound (FastAPI)        outbound HTTP         outbound Kafka
-────────────────     ────────────────────     ─────────────────     ──────────────────
-correlation_id   <-  X-Correlation-ID    ->   X-Correlation-ID  /   correlationId
-trace_id         <-  X-Trace-ID          ->   X-Trace-ID        /   traceId
-session_id       <-  X-Session-ID        ->   X-Session-ID      /   (not mapped = not sent)
+inbound (frontend)   internal context     outbound HTTP         outbound Kafka
+──────────────────   ────────────────     ─────────────────     ──────────────────
+X-Correlation-ID  -> correlation_id   ->  X-Correlation-ID  /   correlationId
+X-Trace-ID        -> trace_id         ->  X-Trace-ID        /   traceId
+
+inbound (partner)    internal context     outbound HTTP         outbound Kafka
+──────────────────   ────────────────     ─────────────────     ──────────────────
+x-request-id      -> correlation_id   ->  X-Correlation-ID  /   correlationId
+x-b3-traceid      -> trace_id         ->  X-Trace-ID        /   traceId
 ```
+
+Each inbound source can use different header names for the same conceptual fields. The internal context and outbound side are identical regardless of source — only the inbound wire name differs.
 
 This applies in both directions:
 
@@ -271,54 +292,73 @@ Application code never sees wire names. It only works with conceptual names.
 
 No built-in defaults. You declare exactly the fields your service needs — nothing more, nothing less.
 
-The recommended pattern is to define your own constants in one place and use them as keys everywhere — config, targets, and accessors. This way a typo is caught by the IDE instead of failing silently at runtime. The `FIELD_` prefix in the examples below is just a naming convention — it is not part of slpy. Name your constants however you want.
+The recommended pattern is to define your own constants in one place and use them as keys everywhere — config, sources, targets, and accessors. This way a typo is caught by the IDE instead of failing silently at runtime. The `FIELD_` and `SOURCE_` prefixes in the examples below are naming conventions — they are not part of slpy.
 
 ```python
-# fields.py — one place, all your field definitions
+# fields.py — one place, all your field and source definitions
 FIELD_CORRELATION = 'correlation_id'
 FIELD_TRACE       = 'trace_id'
 FIELD_TENANT      = 'tenant_id'
-FIELD_REQUEST     = 'request_id'
+
+SOURCE_FRONTEND = 'frontend'
+SOURCE_PARTNER  = 'partner'
+SOURCE_LEGACY   = 'legacy'
 ```
 
 ```python
-from myapp.fields import FIELD_CORRELATION, FIELD_TRACE, FIELD_TENANT, FIELD_REQUEST
+from myapp.fields import (
+    FIELD_CORRELATION, FIELD_TRACE, FIELD_TENANT,
+    SOURCE_FRONTEND, SOURCE_PARTNER, SOURCE_LEGACY,
+)
 
 await slpy.init({
     'context': {
-        'propagation': {
-            FIELD_CORRELATION: 'X-Correlation-ID',
-            FIELD_TRACE:       'X-Trace-ID',
-            FIELD_TENANT:      'X-Tenant-ID',
-            FIELD_REQUEST:     'X-Request-ID',
+        # inbound — one entry per source, each with its own header naming convention
+        'inbound': {
+            SOURCE_FRONTEND: {FIELD_CORRELATION: 'X-Correlation-ID', FIELD_TRACE: 'X-Trace-ID'},
+            SOURCE_PARTNER:  {FIELD_CORRELATION: 'x-request-id',     FIELD_TRACE: 'x-b3-traceid'},
+            SOURCE_LEGACY:   {FIELD_CORRELATION: 'correlationid'},
         },
-        'targets': {
-            'kafka': {FIELD_CORRELATION: 'correlationId', FIELD_TRACE: 'traceId'},
-            's3':    {FIELD_CORRELATION: 'Correlation_ID'},
-            'azure': {FIELD_CORRELATION: 'CorrelationID', FIELD_TRACE: 'TraceID'},
-            'myApi': {FIELD_TENANT: 'tenant', FIELD_REQUEST: 'reqId'},
+        # outbound — how context leaves this service
+        'outbound': {
+            'propagation': {
+                FIELD_CORRELATION: 'X-Correlation-ID',
+                FIELD_TRACE:       'X-Trace-ID',
+                FIELD_TENANT:      'X-Tenant-ID',
+            },
+            'targets': {
+                'kafka': {FIELD_CORRELATION: 'correlationId', FIELD_TRACE: 'traceId'},
+                's3':    {FIELD_CORRELATION: 'Correlation_ID'},
+                'azure': {FIELD_CORRELATION: 'CorrelationID', FIELD_TRACE: 'TraceID'},
+            },
         },
     },
 })
+
+# Each middleware instance reads from its declared source
+app.add_middleware(SyntropyMiddleware, source=SOURCE_FRONTEND)
+```
+
+The `source` parameter tells the middleware which inbound mapping to use. A BFF receiving traffic from multiple origins can have different middleware instances (or routes) each with a different `source`.
 
 ### Usage
 
 ```python
 async with slpy.context(correlation_id='req-001', trace_id='trace-xyz'):
 
-    # HTTP — translates using propagation
+    # HTTP — translates using outbound.propagation
     await httpx.get(url, headers=slpy.get_propagation_headers())
     # -> {'X-Correlation-ID': 'req-001', 'X-Trace-ID': 'trace-xyz'}
 
-    # Kafka — translates using targets.kafka
+    # Kafka — translates using outbound.targets.kafka
     await kafka.send(topic, headers=slpy.get_propagation_headers('kafka'))
     # -> {'correlationId': 'req-001', 'traceId': 'trace-xyz'}
 
-    # S3 — translates using targets.s3
+    # S3 — translates using outbound.targets.s3
     await s3.put_object(Metadata=slpy.get_propagation_headers('s3'))
     # -> {'Correlation_ID': 'req-001'}
 
-    # Azure Service Bus — translates using targets.azure
+    # Azure Service Bus — translates using outbound.targets.azure
     await bus.send(msg, properties=slpy.get_propagation_headers('azure'))
     # -> {'CorrelationID': 'req-001', 'TraceID': 'trace-xyz'}
 ```

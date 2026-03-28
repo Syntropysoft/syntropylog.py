@@ -43,7 +43,9 @@ async def test_outbound_event_target_name():
         "logger": {"level": "info"},
         "observability": {"transports": [obs]},
         "context": {
-            "targets": {"kafka": {"correlation_id": "correlationId"}}
+            "outbound": {
+                "targets": {"kafka": {"correlation_id": "correlationId"}},
+            }
         },
     })
     async with slpy.context(correlation_id="abc-123"):
@@ -58,8 +60,10 @@ async def test_outbound_event_headers_match_target_mapping():
         "logger": {"level": "info"},
         "observability": {"transports": [obs]},
         "context": {
-            "propagation": {"correlation_id": "X-Correlation-ID"},
-            "targets": {"s3": {"correlation_id": "Correlation_ID"}},
+            "outbound": {
+                "propagation": {"correlation_id": "X-Correlation-ID"},
+                "targets": {"s3": {"correlation_id": "Correlation_ID"}},
+            },
         },
     })
     async with slpy.context(correlation_id="abc-123"):
@@ -102,9 +106,11 @@ async def test_multiple_calls_emit_multiple_events():
         "logger": {"level": "info"},
         "observability": {"transports": [obs]},
         "context": {
-            "targets": {
-                "kafka": {"correlation_id": "correlationId"},
-                "s3":    {"correlation_id": "Correlation_ID"},
+            "outbound": {
+                "targets": {
+                    "kafka": {"correlation_id": "correlationId"},
+                    "s3":    {"correlation_id": "Correlation_ID"},
+                },
             }
         },
     })

@@ -34,7 +34,12 @@ def make_app(transport: CaptureTransport) -> FastAPI:
         await slpy.init({
             "logger": {"level": "debug", "transports": [transport]},
             "context": {
-                "propagation": {"correlation_id": "X-Correlation-ID"},
+                "inbound": {
+                    "default": {"correlation_id": "X-Correlation-ID"},
+                },
+                "outbound": {
+                    "propagation": {"correlation_id": "X-Correlation-ID"},
+                },
             },
         })
         yield

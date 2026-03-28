@@ -162,9 +162,11 @@ async def test_get_propagation_header_name_configured(sl):
     await sl.init({
         "logger": {"level": "info"},
         "context": {
-            "propagation": {
-                "correlation_id": "X-Correlation-ID",
-                "trace_id":       "X-Trace-ID",
+            "outbound": {
+                "propagation": {
+                    "correlation_id": "X-Correlation-ID",
+                    "trace_id":       "X-Trace-ID",
+                }
             }
         }
     })
@@ -182,9 +184,11 @@ async def test_get_propagation_headers_returns_active_fields(sl):
     await sl.init({
         "logger": {"level": "info"},
         "context": {
-            "propagation": {
-                "correlation_id": "X-Correlation-ID",
-                "trace_id":       "X-Trace-ID",
+            "outbound": {
+                "propagation": {
+                    "correlation_id": "X-Correlation-ID",
+                    "trace_id":       "X-Trace-ID",
+                }
             }
         }
     })
@@ -199,9 +203,11 @@ async def test_get_propagation_headers_custom_header_names(sl):
     await sl.init({
         "logger": {"level": "info"},
         "context": {
-            "propagation": {
-                "correlation_id": "X-Request-ID",
-                "trace_id":       "X-B3-TraceId",
+            "outbound": {
+                "propagation": {
+                    "correlation_id": "X-Request-ID",
+                    "trace_id":       "X-B3-TraceId",
+                }
             }
         }
     })
@@ -215,9 +221,11 @@ async def test_get_propagation_headers_kafka_target(sl):
     await sl.init({
         "logger": {"level": "info"},
         "context": {
-            "propagation": {"correlation_id": "X-Correlation-ID", "trace_id": "X-Trace-ID"},
-            "targets": {
-                "kafka": {"correlation_id": "correlationId", "trace_id": "traceId"},
+            "outbound": {
+                "propagation": {"correlation_id": "X-Correlation-ID", "trace_id": "X-Trace-ID"},
+                "targets": {
+                    "kafka": {"correlation_id": "correlationId", "trace_id": "traceId"},
+                },
             }
         }
     })
@@ -231,9 +239,11 @@ async def test_get_propagation_headers_s3_target(sl):
     await sl.init({
         "logger": {"level": "info"},
         "context": {
-            "propagation": {"correlation_id": "X-Correlation-ID", "trace_id": "X-Trace-ID"},
-            "targets": {
-                "s3": {"correlation_id": "Correlation_ID", "trace_id": "Trace_ID"},
+            "outbound": {
+                "propagation": {"correlation_id": "X-Correlation-ID", "trace_id": "X-Trace-ID"},
+                "targets": {
+                    "s3": {"correlation_id": "Correlation_ID", "trace_id": "Trace_ID"},
+                },
             }
         }
     })
@@ -247,11 +257,13 @@ async def test_get_propagation_headers_multiple_targets(sl):
     await sl.init({
         "logger": {"level": "info"},
         "context": {
-            "propagation": {"correlation_id": "X-Correlation-ID"},
-            "targets": {
-                "kafka": {"correlation_id": "correlationId"},
-                "azure": {"correlation_id": "CorrelationID"},
-                "s3":    {"correlation_id": "Correlation_ID"},
+            "outbound": {
+                "propagation": {"correlation_id": "X-Correlation-ID"},
+                "targets": {
+                    "kafka": {"correlation_id": "correlationId"},
+                    "azure": {"correlation_id": "CorrelationID"},
+                    "s3":    {"correlation_id": "Correlation_ID"},
+                },
             }
         }
     })
@@ -265,7 +277,9 @@ async def test_get_propagation_headers_multiple_targets(sl):
 async def test_get_propagation_headers_unknown_target_uses_field_name(sl):
     await sl.init({
         "logger": {"level": "info"},
-        "context": {"propagation": {"correlation_id": "X-Correlation-ID"}},
+        "context": {
+            "outbound": {"propagation": {"correlation_id": "X-Correlation-ID"}},
+        },
     })
     async with sl.context(correlation_id="abc-123"):
         headers = sl.get_propagation_headers("unknown-target")

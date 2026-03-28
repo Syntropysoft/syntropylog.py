@@ -15,33 +15,27 @@ class LoggerConfig:
     transports: List[Any] = field(default_factory=list)
 
 
-# No built-in defaults — the developer declares the propagation mapping explicitly.
-_DEFAULT_PROPAGATION: Dict[str, str] = {}
+@dataclass
+class OutboundConfig:
+    # Default outbound: conceptual field → HTTP header name
+    propagation: Dict[str, str] = field(default_factory=dict)
+    # Per-target: target name → {conceptual field → target key}
+    targets: Dict[str, Dict[str, str]] = field(default_factory=dict)
 
 
 @dataclass
 class ContextConfig:
-    # Inbound + default outbound: conceptual field → HTTP header name
-    propagation: Dict[str, str] = field(
-        default_factory=lambda: dict(_DEFAULT_PROPAGATION)
-    )
-    # Per-target outbound mapping: target name → {conceptual field → target key}
-    # Example:
-    #   targets = {
-    #       "kafka":  {"correlation_id": "correlationId", "trace_id": "traceId"},
-    #       "s3":     {"correlation_id": "Correlation_ID"},
-    #       "azure":  {"correlation_id": "CorrelationID"},
-    #   }
-    targets: Dict[str, Dict[str, str]] = field(default_factory=dict)
+    # Per-source inbound: source name → {conceptual field → header name}
+    inbound: Dict[str, Dict[str, str]] = field(default_factory=dict)
+    # Outbound mapping — propagation + per-target
+    outbound: OutboundConfig = field(default_factory=OutboundConfig)
     # Custom headers to extract from inbound requests and propagate as-is
     custom_headers: List[str] = field(default_factory=list)
 
 
 @dataclass
 class ObservabilityConfig:
-    # ObservabilityTransport instances — default: ConsoleObservabilityTransport
     transports: List[Any] = field(default_factory=list)
-    # Whether to emit outbound events automatically on get_propagation_headers()
     enabled: bool = True
 
 
@@ -65,14 +59,11 @@ class ConfigManager:
         logger_raw  = raw.get("logger", {})
         context_raw = raw.get("context", {})
         masking_raw = raw.get("masking", {})
+        obs_raw     = raw.get("observability", {})
 
         level = os.getenv("SLPY_LOG_LEVEL", logger_raw.get("level", "info"))
 
-        propagation = dict(_DEFAULT_PROPAGATION)
-        if "propagation" in context_raw:
-            propagation.update(context_raw["propagation"])
-
-        obs_raw = raw.get("observability", {})
+        outbound_raw = context_raw.get("outbound", {})
 
         self._config = Config(
             logger=LoggerConfig(
@@ -80,8 +71,11 @@ class ConfigManager:
                 transports=logger_raw.get("transports", []),
             ),
             context=ContextConfig(
-                propagation=propagation,
-                targets=context_raw.get("targets", {}),
+                inbound=context_raw.get("inbound", {}),
+                outbound=OutboundConfig(
+                    propagation=outbound_raw.get("propagation", {}),
+                    targets=outbound_raw.get("targets", {}),
+                ),
                 custom_headers=context_raw.get("custom_headers", []),
             ),
             masking=MaskingConfig(
