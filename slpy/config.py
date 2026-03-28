@@ -15,7 +15,7 @@ class LoggerConfig:
     transports: List[Any] = field(default_factory=list)
 
 
-# Default propagation headers — conceptual name → HTTP header name
+# Default propagation — conceptual name → HTTP header name (inbound + default outbound)
 _DEFAULT_PROPAGATION: Dict[str, str] = {
     "correlation_id": "X-Correlation-ID",
     "trace_id":       "X-Trace-ID",
@@ -26,12 +26,19 @@ _DEFAULT_PROPAGATION: Dict[str, str] = {
 
 @dataclass
 class ContextConfig:
-    # Maps conceptual field name → HTTP header name
-    # Used by middleware (inbound) and get_propagation_headers() (outbound)
+    # Inbound + default outbound: conceptual field → HTTP header name
     propagation: Dict[str, str] = field(
         default_factory=lambda: dict(_DEFAULT_PROPAGATION)
     )
-    # Additional custom headers to extract and propagate as-is
+    # Per-target outbound mapping: target name → {conceptual field → target key}
+    # Example:
+    #   targets = {
+    #       "kafka":  {"correlation_id": "correlationId", "trace_id": "traceId"},
+    #       "s3":     {"correlation_id": "Correlation_ID"},
+    #       "azure":  {"correlation_id": "CorrelationID"},
+    #   }
+    targets: Dict[str, Dict[str, str]] = field(default_factory=dict)
+    # Custom headers to extract from inbound requests and propagate as-is
     custom_headers: List[str] = field(default_factory=list)
 
 
@@ -55,10 +62,8 @@ class ConfigManager:
         context_raw = raw.get("context", {})
         masking_raw = raw.get("masking", {})
 
-        # Env override for log level
         level = os.getenv("SLPY_LOG_LEVEL", logger_raw.get("level", "info"))
 
-        # Propagation — merge user config over defaults
         propagation = dict(_DEFAULT_PROPAGATION)
         if "propagation" in context_raw:
             propagation.update(context_raw["propagation"])
@@ -70,6 +75,7 @@ class ConfigManager:
             ),
             context=ContextConfig(
                 propagation=propagation,
+                targets=context_raw.get("targets", {}),
                 custom_headers=context_raw.get("custom_headers", []),
             ),
             masking=MaskingConfig(

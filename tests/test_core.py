@@ -188,3 +188,64 @@ async def test_get_propagation_headers_custom_header_names(sl):
         headers = sl.get_propagation_headers()
         assert headers["X-Request-ID"] == "abc-123"
         assert headers["X-B3-TraceId"] == "xyz-789"
+
+
+async def test_get_propagation_headers_kafka_target(sl):
+    await sl.init({
+        "logger": {"level": "info"},
+        "context": {
+            "targets": {
+                "kafka": {
+                    "correlation_id": "correlationId",
+                    "trace_id":       "traceId",
+                }
+            }
+        }
+    })
+    async with sl.context(correlation_id="abc-123", trace_id="xyz-789"):
+        headers = sl.get_propagation_headers("kafka")
+        assert headers["correlationId"] == "abc-123"
+        assert headers["traceId"] == "xyz-789"
+
+
+async def test_get_propagation_headers_s3_target(sl):
+    await sl.init({
+        "logger": {"level": "info"},
+        "context": {
+            "targets": {
+                "s3": {
+                    "correlation_id": "Correlation_ID",
+                    "trace_id":       "Trace_ID",
+                }
+            }
+        }
+    })
+    async with sl.context(correlation_id="abc-123", trace_id="xyz-789"):
+        headers = sl.get_propagation_headers("s3")
+        assert headers["Correlation_ID"] == "abc-123"
+        assert headers["Trace_ID"] == "xyz-789"
+
+
+async def test_get_propagation_headers_multiple_targets(sl):
+    await sl.init({
+        "logger": {"level": "info"},
+        "context": {
+            "targets": {
+                "kafka": {"correlation_id": "correlationId"},
+                "azure": {"correlation_id": "CorrelationID"},
+                "s3":    {"correlation_id": "Correlation_ID"},
+            }
+        }
+    })
+    async with sl.context(correlation_id="abc-123"):
+        assert sl.get_propagation_headers("kafka")["correlationId"] == "abc-123"
+        assert sl.get_propagation_headers("azure")["CorrelationID"] == "abc-123"
+        assert sl.get_propagation_headers("s3")["Correlation_ID"] == "abc-123"
+        assert sl.get_propagation_headers()["X-Correlation-ID"] == "abc-123"
+
+
+async def test_get_propagation_headers_unknown_target_uses_field_name(sl):
+    await sl.init({"logger": {"level": "info"}})
+    async with sl.context(correlation_id="abc-123"):
+        headers = sl.get_propagation_headers("unknown-target")
+        assert headers["correlation_id"] == "abc-123"

@@ -125,28 +125,49 @@ class SyntropyLog:
         for logger in self._loggers.values():
             logger._level = level
 
-    def get_propagation_headers(self) -> Dict[str, str]:
+    def get_propagation_headers(self, target: Optional[str] = None) -> Dict[str, str]:
         """
-        Return all propagation headers with their configured HTTP header names
-        and current context values. Only includes fields that have a value.
+        Return propagation fields with the key names for the given target.
 
-        Use this to forward context to any outgoing call — HTTP, Kafka,
-        gRPC, RabbitMQ, or any other transport.
-
-            headers = slpy.get_propagation_headers()
+        Without target — uses the HTTP header names from context.propagation:
+            slpy.get_propagation_headers()
             # → {"X-Correlation-ID": "abc-123", "X-Trace-ID": "xyz-789"}
 
-            await httpx.get(url, headers=headers)
-            await kafka_producer.send(topic, headers=headers)
+        With target — uses the key names configured in context.targets:
+            slpy.get_propagation_headers("kafka")
+            # → {"correlationId": "abc-123", "traceId": "xyz-789"}
+
+            slpy.get_propagation_headers("s3")
+            # → {"Correlation_ID": "abc-123"}
+
+        Only fields that have a value in the current context are included.
+
+        Usage:
+            await httpx.get(url, headers=slpy.get_propagation_headers())
+            await kafka.send(topic, headers=slpy.get_propagation_headers("kafka"))
+            await s3.put_object(Metadata=slpy.get_propagation_headers("s3"))
+            await azure_bus.send(msg, properties=slpy.get_propagation_headers("azure"))
         """
         self._require_initialized()
         ctx: Dict[str, Any] = self._context.get()
-        propagation: Dict[str, str] = self._config.context.propagation
         result: Dict[str, str] = {}
-        for field_name, header_name in propagation.items():
-            value = ctx.get(field_name)
-            if value is not None:
-                result[header_name] = str(value)
+
+        if target is None:
+            # Default — use HTTP header names from propagation config
+            for field_name, header_name in self._config.context.propagation.items():
+                value = ctx.get(field_name)
+                if value is not None:
+                    result[header_name] = str(value)
+        else:
+            # Target-specific — use key names from targets config
+            target_map: Dict[str, str] = self._config.context.targets.get(target, {})
+            # Fall back to propagation keys for fields not in target map
+            for field_name in self._config.context.propagation:
+                value = ctx.get(field_name)
+                if value is not None:
+                    key = target_map.get(field_name, field_name)
+                    result[key] = str(value)
+
         return result
 
     def get_correlation_id(self) -> Optional[str]:
