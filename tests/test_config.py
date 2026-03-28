@@ -9,9 +9,8 @@ def test_defaults():
     assert cfg.logger.level == "info"
     assert cfg.logger.transports == []
     assert cfg.masking.enable_default_rules is True
-    assert cfg.context.inbound == {}          # no built-in defaults
-    assert cfg.context.outbound.propagation == {}
-    assert cfg.context.outbound.targets == {}
+    assert cfg.context.inbound == {}   # no built-in defaults
+    assert cfg.context.outbound == {}
     assert cfg.context.custom_headers == []
 
 
@@ -47,16 +46,16 @@ def test_custom_propagation():
     cfg = ConfigManager({
         "context": {
             "outbound": {
-                "propagation": {
+                "http": {
                     "correlation_id": "X-Request-ID",
                     "trace_id":       "X-B3-TraceId",
                 }
             }
         }
     })
-    assert cfg.context.outbound.propagation["correlation_id"] == "X-Request-ID"
-    assert cfg.context.outbound.propagation["trace_id"] == "X-B3-TraceId"
-    assert "session_id" not in cfg.context.outbound.propagation
+    assert cfg.context.outbound["http"]["correlation_id"] == "X-Request-ID"
+    assert cfg.context.outbound["http"]["trace_id"] == "X-B3-TraceId"
+    assert "session_id" not in cfg.context.outbound["http"]
 
 
 def test_inbound_config():

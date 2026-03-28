@@ -16,19 +16,12 @@ class LoggerConfig:
 
 
 @dataclass
-class OutboundConfig:
-    # Default outbound: conceptual field → HTTP header name
-    propagation: Dict[str, str] = field(default_factory=dict)
-    # Per-target: target name → {conceptual field → target key}
-    targets: Dict[str, Dict[str, str]] = field(default_factory=dict)
-
-
-@dataclass
 class ContextConfig:
     # Per-source inbound: source name → {conceptual field → header name}
     inbound: Dict[str, Dict[str, str]] = field(default_factory=dict)
-    # Outbound mapping — propagation + per-target
-    outbound: OutboundConfig = field(default_factory=OutboundConfig)
+    # Per-target outbound: target name → {conceptual field → wire name}
+    # Use 'http' for the default HTTP target (used by get_propagation_headers() with no arg)
+    outbound: Dict[str, Dict[str, str]] = field(default_factory=dict)
     # Custom headers to extract from inbound requests and propagate as-is
     custom_headers: List[str] = field(default_factory=list)
 
@@ -63,8 +56,6 @@ class ConfigManager:
 
         level = os.getenv("SLPY_LOG_LEVEL", logger_raw.get("level", "info"))
 
-        outbound_raw = context_raw.get("outbound", {})
-
         self._config = Config(
             logger=LoggerConfig(
                 level=level,
@@ -72,10 +63,7 @@ class ConfigManager:
             ),
             context=ContextConfig(
                 inbound=context_raw.get("inbound", {}),
-                outbound=OutboundConfig(
-                    propagation=outbound_raw.get("propagation", {}),
-                    targets=outbound_raw.get("targets", {}),
-                ),
+                outbound=context_raw.get("outbound", {}),
                 custom_headers=context_raw.get("custom_headers", []),
             ),
             masking=MaskingConfig(

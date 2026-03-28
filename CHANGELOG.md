@@ -4,6 +4,56 @@ All notable changes to slpy are documented here.
 
 ---
 
+## [0.3.2] — 2026-03-28
+
+### Breaking changes
+
+- **`context.outbound` is now a flat dict, symmetric with `context.inbound`.**
+  The `propagation`/`targets` split inside `outbound` is replaced by a single flat
+  dict where each key is a target name — exactly like `inbound` where each key is a
+  source name.
+
+  ```python
+  # Before (0.3.1)
+  'outbound': {
+      'propagation': {'correlation_id': 'X-Correlation-ID'},
+      'targets': {
+          'kafka': {'correlation_id': 'correlationId'},
+      },
+  }
+
+  # After (0.3.2)
+  'outbound': {
+      'http':  {'correlation_id': 'X-Correlation-ID'},  # TARGET_HTTP = 'http'
+      'kafka': {'correlation_id': 'correlationId'},
+  }
+  ```
+
+- **`get_propagation_headers()` with no argument uses the `'http'` key** in `outbound`.
+  `get_propagation_headers('kafka')` uses the `'kafka'` key. No fallback for unknown
+  targets — an unconfigured target returns `{}`.
+
+- **`get_propagation_headers('unknown')` now returns `{}`** instead of using field names
+  as keys. If a target is not in `outbound`, nothing is sent to it.
+
+### Philosophy
+
+`inbound` and `outbound` now have identical structure: `{name: {field: wire_name}}`.
+One is keyed by source, the other by destination. The internal context is the translation
+layer between them. Application code works exclusively with conceptual field names.
+
+The only framework opinion kept: `'http'` is the default target key used when
+`get_propagation_headers()` is called with no argument. Define `TARGET_HTTP = 'http'`
+in your constants if you want explicit, IDE-friendly usage.
+
+### Testing
+
+- 101 tests, all updated for the new flat `outbound` structure.
+- Renamed `test_get_propagation_headers_unknown_target_uses_field_name` →
+  `test_get_propagation_headers_unknown_target_returns_empty`.
+
+---
+
 ## [0.3.1] — 2026-03-28
 
 ### Breaking changes

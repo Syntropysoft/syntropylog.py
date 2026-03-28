@@ -54,8 +54,8 @@ if _starlette_available:
             inbound_map: Dict[str, str] = (
                 slpy._config.context.inbound.get(self._source, {})
             )
-            outbound_propagation: Dict[str, str] = (
-                slpy._config.context.outbound.propagation
+            outbound_http: Dict[str, str] = (
+                slpy._config.context.outbound.get("http", {})
             )
             custom_headers = slpy._config.context.custom_headers
 
@@ -68,8 +68,8 @@ if _starlette_available:
                     value = str(uuid.uuid4())
                 if value is not None:
                     ctx_fields[field_name] = value
-                    # Forward using the outbound wire name if configured
-                    outbound_header = outbound_propagation.get(field_name, header_name)
+                    # Forward using the outbound HTTP wire name if configured
+                    outbound_header = outbound_http.get(field_name, header_name)
                     response_headers[outbound_header] = value
 
             for header_name in custom_headers:
