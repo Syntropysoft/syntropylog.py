@@ -276,12 +276,14 @@ slpy includes an optional Rust addon (`slpy-native`) that accelerates the maskin
 
 ```
 Simple log             Complex object + masking
-─────────────────────  ────────────────────────────────────
+---------------------  ------------------------------------
 slpy        6.2 µs  ①  structlog      10.8 µs  (no masking)
 structlog   8.0 µs     slpy           18.0 µs  ② ✅ masking ON
 logging    18.8 µs     logging        20.4 µs  (no masking)
 loguru     58.9 µs     loguru         61.8 µs  (no masking)
 ```
+
+> pyperf, null transport, Windows 11 local — numbers above are conservative.
 
 **slpy is the fastest structured logger on simple logs** — faster than structlog, which is the Python performance reference.
 
@@ -289,19 +291,17 @@ loguru     58.9 µs     loguru         61.8 µs  (no masking)
 
 The Rust addon reduced masking overhead from 29 µs to 12 µs (59% improvement). If the addon is not installed, slpy falls back to the pure Python engine transparently.
 
-### Sustained throughput — 1M and 10M iterations
+### Sustained throughput — official results (GitHub Actions, Ubuntu, Python 3.12)
 
-> Windows 11, Python 3.14.3, local machine. Linux numbers are 30–50% better.
+| Scenario | logs/sec | µs/log | degradation |
+|----------|----------|--------|-------------|
+| Simple log | **85,774** | 11.7 | — |
+| MaskingEngine only | **59,369** | 16.8 | — |
+| child() + log | **58,165** | 17.2 | 0 B heap |
+| Complex log + masking | **33,472** | 29.9 | — |
+| Async context scope | **22,237** | 45.0 | none (1M → 10M: 44.97 → 44.76 µs) |
 
-| Scenario | logs/sec | µs/log | 1M → 10M degradation |
-|----------|----------|--------|----------------------|
-| Simple log | ~51,000 | 19.4 | **none** (19.45 → 19.44 µs) |
-| child() + log | ~34,000 | 29.0 | **none** |
-| MaskingEngine only | ~30,000 | 33.6 | **none** |
-| Complex log + masking | ~17,000 | 57.1 | **none** (warm cache slightly faster) |
-| Async context scope | ~12,000 | 79.2 | **none** |
-
-Zero degradation from 1M to 10M iterations. Heap delta at 10M is 8–32 bytes across all scenarios — no memory leaks, no GC pressure accumulation. `child()` allocates 0 bytes at sustained volume.
+Zero degradation across all scenarios. `child()` and async context scope allocate **0 bytes** at sustained volume — no GC pressure regardless of call volume.
 
 See [benchmark/README.md](benchmark/README.md) for full methodology and how to reproduce.
 

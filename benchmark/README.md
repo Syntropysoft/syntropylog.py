@@ -85,8 +85,41 @@ SLPY_NATIVE_DISABLE=1 py benchmark/bench.py --fast
 
 ---
 
+## Stress test — official results (GitHub Actions, Ubuntu, Python 3.12)
+
+> 1M iterations per scenario, Rust addon active, null transport.
+
+```
+Simple log  (slpy.info — no masking payload)
+  1M    1.166s    85,774 logs/sec    11.66 µs/log    1.30 KB heap
+
+Complex log  (slpy.info + nested object — masking ON)
+  1M    2.988s    33,472 logs/sec    29.88 µs/log   11.30 KB heap
+
+MaskingEngine.process() only  (hot path isolation)
+  1M    1.684s    59,369 logs/sec    16.84 µs/log    4.03 KB heap
+
+child() + log  (new binding per iteration)
+  1M    1.719s    58,165 logs/sec    17.19 µs/log       0 B heap
+
+Async context scope  (open+close per iteration)
+  1M    4.497s    22,237 logs/sec    44.97 µs/log       0 B heap
+  10M  44.762s    22,340 logs/sec    44.76 µs/log       0 B heap
+```
+
+**child() and async context scope allocate 0 bytes at 1M iterations** — no GC pressure.
+**Async context scope: zero degradation from 1M to 10M** (44.97 → 44.76 µs).
+
+---
+
 ## Environment
 
-These numbers were captured on Windows 11, Python 3.14.3, AMD64.
-Results on Linux will be faster and more stable (less OS jitter).
-For production-grade numbers, run on a dedicated Linux machine with `python -m pyperf system tune`.
+- **Official (CI):** Ubuntu latest, Python 3.12, GitHub Actions — use these numbers for comparisons.
+- **Local reference:** Windows 11, Python 3.14.3, AMD64 — ~1.7–2x slower due to OS jitter.
+
+To reproduce the official numbers locally on Linux:
+```bash
+python -m pyperf system tune   # reduce OS jitter
+python benchmark/bench.py
+SLPY_BENCH_VOLUMES=1000000 python benchmark/stress.py
+```
