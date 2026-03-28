@@ -124,3 +124,34 @@ async def test_set_level_affects_existing_loggers(sl):
     sl.set_level("debug")
     logger.debug("now visible")
     assert len(t.entries) == 1
+
+
+# ------------------------------------------------------------------
+# get_correlation_id()
+# ------------------------------------------------------------------
+
+async def test_get_correlation_id_returns_none_when_not_set(sl):
+    await sl.init({"logger": {"level": "info"}})
+    assert sl.get_correlation_id() is None
+
+
+async def test_get_correlation_id_returns_value_from_context(sl):
+    await sl.init({"logger": {"level": "info"}})
+    async with sl.context(correlation_id="req-abc-123"):
+        assert sl.get_correlation_id() == "req-abc-123"
+
+
+async def test_get_correlation_id_clears_after_scope(sl):
+    await sl.init({"logger": {"level": "info"}})
+    async with sl.context(correlation_id="req-abc-123"):
+        pass
+    assert sl.get_correlation_id() is None
+
+
+# ------------------------------------------------------------------
+# get_correlation_id_header_name()
+# ------------------------------------------------------------------
+
+async def test_get_correlation_id_header_name_default(sl):
+    await sl.init({"logger": {"level": "info"}})
+    assert sl.get_correlation_id_header_name() == "X-Correlation-ID"

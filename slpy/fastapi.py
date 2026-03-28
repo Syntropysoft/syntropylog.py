@@ -13,7 +13,10 @@ Every log emitted during a request automatically carries:
 """
 
 import uuid
-from typing import Any
+from typing import Any, Optional
+
+# Accessible from slpy.get_correlation_id_header_name()
+_correlation_header: str = "X-Correlation-ID"
 
 # Starlette is a dependency of FastAPI — no extra install needed.
 try:
@@ -45,6 +48,8 @@ if _starlette_available:
         def __init__(self, app: Any, correlation_header: str = "X-Correlation-ID") -> None:
             super().__init__(app)
             self._header = correlation_header.lower()
+            global _correlation_header
+            _correlation_header = correlation_header
 
         async def dispatch(self, request: Request, call_next: Any) -> Response:
             from slpy import slpy  # late import to avoid circular dependency

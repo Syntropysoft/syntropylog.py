@@ -125,6 +125,35 @@ class SyntropyLog:
         for logger in self._loggers.values():
             logger._level = level
 
+    def get_correlation_id(self) -> Optional[str]:
+        """
+        Return the correlation_id from the current context, or None if not set.
+
+        Useful when you need to forward the correlation_id to an outgoing
+        HTTP call or a message queue without going through a logger.
+
+            correlation_id = slpy.get_correlation_id()
+            headers = {"X-Correlation-ID": correlation_id} if correlation_id else {}
+        """
+        self._require_initialized()
+        return self._context.get().get("correlation_id")
+
+    def get_correlation_id_header_name(self) -> str:
+        """
+        Return the HTTP header name used for correlation_id propagation.
+
+        Matches the correlation_header configured in SyntropyMiddleware
+        (default: 'X-Correlation-ID').
+
+            header_name = slpy.get_correlation_id_header_name()
+            correlation_id = request.headers.get(header_name)
+        """
+        try:
+            from slpy.fastapi import _correlation_header
+            return _correlation_header
+        except ImportError:
+            return "X-Correlation-ID"
+
     @property
     def is_initialized(self) -> bool:
         return self._initialized
