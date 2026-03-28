@@ -244,18 +244,43 @@ async def get_order(order_id: str):
 
 ## Propagation headers
 
-When your service calls another service, context must travel with the request. slpy builds the header dict automatically using the names each destination expects — you declare the mapping once, call one method everywhere.
+### Conceptual field names
+
+`correlation_id`, `trace_id`, `session_id`, `transaction_id` are **conceptual names internal to the framework**. They are not the names that travel on the wire — they are the keys slpy uses to identify each field inside the active context.
+
+The actual name that travels — the HTTP header, the Kafka key, the S3 metadata key — is declared by you in the configuration. The framework uses the conceptual names internally to read and write context, and translates them to the correct wire name for each destination at the moment of sending.
+
+```
+internal context     inbound (FastAPI)        outbound HTTP         outbound Kafka
+────────────────     ────────────────────     ─────────────────     ──────────────────
+correlation_id   <-  X-Correlation-ID    ->   X-Correlation-ID  /   correlationId
+trace_id         <-  X-Trace-ID          ->   X-Trace-ID        /   traceId
+session_id       <-  X-Session-ID        ->   X-Session-ID      /   (not mapped = not sent)
+```
+
+This applies in both directions:
+
+- **Inbound** — `SyntropyMiddleware` reads incoming request headers using the wire names (`X-Correlation-ID`) and stores them in context under the conceptual name (`correlation_id`).
+- **Outbound** — `get_propagation_headers()` reads context by conceptual name and returns the dict translated to the wire names for the requested destination.
+
+Application code never sees wire names. It only works with conceptual names.
+
+---
+
+### Configuration
 
 ```python
 await slpy.init({
     'context': {
-        # Default outbound: conceptual name -> HTTP header name
-        # (also used for inbound extraction in FastAPI middleware)
+        # Conceptual name -> wire name (used for both inbound and outbound HTTP)
         'propagation': {
             'correlation_id': 'X-Correlation-ID',
             'trace_id':       'X-Trace-ID',
+            'session_id':     'X-Session-ID',
+            'transaction_id': 'X-Transaction-ID',
         },
-        # Per-destination key names — each target gets its own convention
+        # Per-destination wire names — each protocol has its own naming convention.
+        # Key = conceptual name, value = wire name for that destination.
         'targets': {
             'kafka': {'correlation_id': 'correlationId', 'trace_id': 'traceId'},
             's3':    {'correlation_id': 'Correlation_ID'},
@@ -265,36 +290,40 @@ await slpy.init({
 })
 ```
 
+The `propagation` defaults are already included — only override what you need to change. `targets` is empty by default.
+
+### Usage
+
 ```python
 async with slpy.context(correlation_id='req-001', trace_id='trace-xyz'):
 
-    # HTTP — uses propagation header names
+    # HTTP — translates using propagation
     await httpx.get(url, headers=slpy.get_propagation_headers())
-    # → {'X-Correlation-ID': 'req-001', 'X-Trace-ID': 'trace-xyz'}
+    # -> {'X-Correlation-ID': 'req-001', 'X-Trace-ID': 'trace-xyz'}
 
-    # Kafka — uses kafka target key names
+    # Kafka — translates using targets.kafka
     await kafka.send(topic, headers=slpy.get_propagation_headers('kafka'))
-    # → {'correlationId': 'req-001', 'traceId': 'trace-xyz'}
+    # -> {'correlationId': 'req-001', 'traceId': 'trace-xyz'}
 
-    # S3 — uses s3 target key names
+    # S3 — translates using targets.s3
     await s3.put_object(Metadata=slpy.get_propagation_headers('s3'))
-    # → {'Correlation_ID': 'req-001'}
+    # -> {'Correlation_ID': 'req-001'}
 
-    # Azure Service Bus — uses azure target key names
+    # Azure Service Bus — translates using targets.azure
     await bus.send(msg, properties=slpy.get_propagation_headers('azure'))
-    # → {'CorrelationID': 'req-001', 'TraceID': 'trace-xyz'}
+    # -> {'CorrelationID': 'req-001', 'TraceID': 'trace-xyz'}
 ```
 
-One declaration. Any destination. No boilerplate per target.
+Only fields that have a value in the active context appear in the result.
 
 **Context accessors**
 
 ```python
-slpy.get_correlation_id()               # → 'req-001'
-slpy.get_trace_id()                     # → 'trace-xyz'
-slpy.get_session_id()                   # → None (if not in context)
-slpy.get_transaction_id()               # → None
-slpy.get_propagation_header_name('correlation_id')  # → 'X-Correlation-ID'
+slpy.get_correlation_id()               # -> 'req-001'
+slpy.get_trace_id()                     # -> 'trace-xyz'
+slpy.get_session_id()                   # -> None (if not in context)
+slpy.get_transaction_id()               # -> None
+slpy.get_propagation_header_name('correlation_id')  # -> 'X-Correlation-ID'
 ```
 
 ---
