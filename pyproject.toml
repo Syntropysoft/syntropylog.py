@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "slpy"
+version = "0.1.0"
+description = "The Declarative Observability Framework for Python"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Syntropysoft", email = "info@syntropysoft.com" }]
+requires-python = ">=3.7"
+dependencies = []
+keywords = ["logging", "observability", "masking", "context", "fastapi", "async"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.7",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: System :: Logging",
+    "Topic :: System :: Monitoring",
+]
+
+[project.urls]
+Homepage = "https://github.com/Syntropysoft/slpy"
+Repository = "https://github.com/Syntropysoft/slpy"
+Issues = "https://github.com/Syntropysoft/slpy/issues"
+
+[project.optional-dependencies]
+fastapi = ["fastapi>=0.100.0"]
+dev = ["pytest>=7.0.0", "pytest-asyncio>=0.21.0", "pytest-cov>=4.0.0"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.setuptools.packages.find]
+include = ["slpy", "slpy.*"]
+
+[tool.setuptools.package-data]
+slpy = ["py.typed"]

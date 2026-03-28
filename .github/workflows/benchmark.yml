@@ -1,0 +1,70 @@
+name: Benchmark
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  benchmark:
+    name: Stress test (Ubuntu, Python 3.12)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            slpy-native/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('slpy-native/Cargo.toml') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Build slpy-native (Rust addon)
+        run: |
+          pip install maturin
+          cd slpy-native
+          maturin build --release
+          pip install target/wheels/*.whl
+
+      - name: Install dependencies
+        run: pip install structlog loguru pyperf
+
+      - name: Run benchmark (pyperf — per-call µs)
+        run: python benchmark/bench.py --fast
+        continue-on-error: true
+
+      - name: Run stress test (100k — sustained throughput)
+        env:
+          SLPY_BENCH_VOLUMES: "100000"
+        run: python benchmark/stress.py
+
+      - name: Post results to job summary
+        if: always()
+        env:
+          SLPY_BENCH_VOLUMES: "100000"
+        run: |
+          echo "## slpy Benchmark Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment:** Ubuntu latest, Python 3.12, Rust $(rustc --version)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### pyperf — per-call latency (µs)" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          python benchmark/bench.py --fast 2>&1 | grep -E "^\w" >> $GITHUB_STEP_SUMMARY || true
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Stress test — 100k iterations" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          python benchmark/stress.py 2>&1 >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
