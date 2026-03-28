@@ -280,12 +280,15 @@ await slpy.init({
             'trace_id':       'X-Trace-ID',          # example
             'tenant_id':      'X-Tenant-ID',         # your own field
             'request_id':     'X-Request-ID',        # your own field
+            'user_id':        'X-User-ID',           # your own field
+            'my_custom_field':'X-My-Header',         # whatever you fancy
         },
         # Same conceptual names, different wire names per destination
         'targets': {
             'kafka': {'correlation_id': 'correlationId', 'trace_id': 'traceId'},
             's3':    {'correlation_id': 'Correlation_ID'},
             'azure': {'correlation_id': 'CorrelationID',  'trace_id': 'TraceID'},
+            'myApi': {'my_custom_field':'other-name'}
         },
     },
 })
