@@ -4,6 +4,7 @@ Run all slpy examples and report pass/fail.
 Usage:
     py run_examples.py
 
+Runs all 8 examples from source without publishing the package.
 Examples that require extra dependencies (fastapi, uvicorn) are skipped
 automatically if those packages are not installed.
 """

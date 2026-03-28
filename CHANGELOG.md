@@ -78,6 +78,14 @@ rebuilt from scratch for Python idioms.
   warn=yellow, error=red, audit=cyan. Format: `HH:MM:SS.mmm  LEVEL  service  message  key=value`.
   Masking remains active — sensitive fields are masked in pretty output too.
   `colors=True/False` to force on/off; default=auto-detect.
+- **`UniversalAdapter`** — wraps an executor function (sync or async) that receives the clean,
+  already-masked log entry and routes it to any destination. The entry arrives with context
+  propagation applied, masking complete, and all bindings merged. The executor is the only
+  thing the consumer writes.
+- **`AdapterTransport`** — transport that delegates to a `UniversalAdapter`. Accepts an optional
+  `formatter` to transform the entry before it reaches the executor (field mapping, type
+  conversion, schema adaptation). One executor can fan out to N destinations via `asyncio.gather`.
+  Silent observer — errors in the executor never propagate to the application.
 - **`Transport` base class** — implement `log(entry: dict)` to route entries anywhere.
 - Multiple transports supported — entries are sent to all of them.
 
@@ -116,6 +124,8 @@ Compared to ecosystem peers (pyperf, null transport, Windows):
 - `04_masking.py` — default rules, nested objects, custom rules.
 - `05_with_meta_and_audit.py` — with_meta(), audit level bypass.
 - `06_fastapi_middleware.py` — SyntropyMiddleware with lifespan.
+- `07_pretty_console.py` — PrettyConsoleTransport colored output.
+- `08_adapter_transport.py` — AdapterTransport + UniversalAdapter fanout to Postgres, MongoDB, Elasticsearch simultaneously.
 
 ### Package
 
