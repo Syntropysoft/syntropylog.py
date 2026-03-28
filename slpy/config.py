@@ -12,13 +12,27 @@ from typing import Any, Dict, List, Optional
 @dataclass
 class LoggerConfig:
     level: str = "info"
-    transports: List[Any] = field(default_factory=list)  # Transport instances
+    transports: List[Any] = field(default_factory=list)
+
+
+# Default propagation headers — conceptual name → HTTP header name
+_DEFAULT_PROPAGATION: Dict[str, str] = {
+    "correlation_id": "X-Correlation-ID",
+    "trace_id":       "X-Trace-ID",
+    "session_id":     "X-Session-ID",
+    "transaction_id": "X-Transaction-ID",
+}
 
 
 @dataclass
 class ContextConfig:
-    correlation_id_header: str = "X-Correlation-ID"
-    enable_auto_correlation: bool = True
+    # Maps conceptual field name → HTTP header name
+    # Used by middleware (inbound) and get_propagation_headers() (outbound)
+    propagation: Dict[str, str] = field(
+        default_factory=lambda: dict(_DEFAULT_PROPAGATION)
+    )
+    # Additional custom headers to extract and propagate as-is
+    custom_headers: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -37,12 +51,17 @@ class Config:
 
 class ConfigManager:
     def __init__(self, raw: Dict[str, Any]):
-        logger_raw = raw.get("logger", {})
+        logger_raw  = raw.get("logger", {})
         context_raw = raw.get("context", {})
         masking_raw = raw.get("masking", {})
 
         # Env override for log level
         level = os.getenv("SLPY_LOG_LEVEL", logger_raw.get("level", "info"))
+
+        # Propagation — merge user config over defaults
+        propagation = dict(_DEFAULT_PROPAGATION)
+        if "propagation" in context_raw:
+            propagation.update(context_raw["propagation"])
 
         self._config = Config(
             logger=LoggerConfig(
@@ -50,12 +69,8 @@ class ConfigManager:
                 transports=logger_raw.get("transports", []),
             ),
             context=ContextConfig(
-                correlation_id_header=context_raw.get(
-                    "correlation_id_header", "X-Correlation-ID"
-                ),
-                enable_auto_correlation=context_raw.get(
-                    "enable_auto_correlation", True
-                ),
+                propagation=propagation,
+                custom_headers=context_raw.get("custom_headers", []),
             ),
             masking=MaskingConfig(
                 enable_default_rules=masking_raw.get("enable_default_rules", True),

@@ -1,24 +1,21 @@
 """
 FastAPI / ASGI middleware for slpy.
 
-One line wires automatic correlation propagation into every request:
+One line wires automatic context propagation into every request:
 
     from slpy.fastapi import SyntropyMiddleware
 
     app = FastAPI()
     app.add_middleware(SyntropyMiddleware)
 
-Every log emitted during a request automatically carries:
-    correlation_id, method, path
+Every log emitted during a request automatically carries the fields
+declared in the 'context.propagation' config (correlation_id, trace_id,
+session_id, transaction_id) plus any custom_headers configured.
 """
 
 import uuid
-from typing import Any, Optional
+from typing import Any, Dict, Optional
 
-# Accessible from slpy.get_correlation_id_header_name()
-_correlation_header: str = "X-Correlation-ID"
-
-# Starlette is a dependency of FastAPI — no extra install needed.
 try:
     from starlette.middleware.base import BaseHTTPMiddleware
     from starlette.requests import Request
@@ -41,34 +38,48 @@ if _starlette_available:
         """
         ASGI middleware that opens a slpy context scope per request.
 
-        Configuration (optional kwargs to add_middleware):
-            correlation_header: str  — header name to read/write (default: X-Correlation-ID)
-        """
+        Reads headers defined in slpy.init() context.propagation config,
+        sets them in context under their conceptual names, and forwards
+        them in the response.
 
-        def __init__(self, app: Any, correlation_header: str = "X-Correlation-ID") -> None:
-            super().__init__(app)
-            self._header = correlation_header.lower()
-            global _correlation_header
-            _correlation_header = correlation_header
+        No configuration needed here — everything is declared in init().
+        """
 
         async def dispatch(self, request: Request, call_next: Any) -> Response:
             from slpy import slpy  # late import to avoid circular dependency
 
-            correlation_id = (
-                request.headers.get(self._header) or str(uuid.uuid4())
-            )
+            propagation: Dict[str, str] = slpy._config.context.propagation
+            custom_headers = slpy._config.context.custom_headers
 
-            async with slpy.context(
-                correlation_id=correlation_id,
-                method=request.method,
-                path=str(request.url.path),
-            ):
+            # Build context fields from propagation config
+            ctx_fields: Dict[str, Any] = {}
+            response_headers: Dict[str, str] = {}
+
+            for field_name, header_name in propagation.items():
+                value = request.headers.get(header_name)
+                if value is None and field_name == "correlation_id":
+                    value = str(uuid.uuid4())  # always generate if missing
+                if value is not None:
+                    ctx_fields[field_name] = value
+                    response_headers[header_name] = value
+
+            # Custom headers — stored as-is using normalized key
+            for header_name in custom_headers:
+                value = request.headers.get(header_name)
+                if value is not None:
+                    key = header_name.lower().replace("-", "_")
+                    ctx_fields[key] = value
+
+            ctx_fields["method"] = request.method
+            ctx_fields["path"] = str(request.url.path)
+
+            async with slpy.context(**ctx_fields):
                 response = await call_next(request)
-                response.headers[self._header] = correlation_id
+                for header_name, value in response_headers.items():
+                    response.headers[header_name] = value
                 return response
 
 else:
-    # Placeholder so imports don't fail when starlette is not installed
     class SyntropyMiddleware:  # type: ignore[no-redef]
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             _require_starlette()

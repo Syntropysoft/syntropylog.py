@@ -125,34 +125,62 @@ class SyntropyLog:
         for logger in self._loggers.values():
             logger._level = level
 
+    def get_propagation_headers(self) -> Dict[str, str]:
+        """
+        Return all propagation headers with their configured HTTP header names
+        and current context values. Only includes fields that have a value.
+
+        Use this to forward context to any outgoing call — HTTP, Kafka,
+        gRPC, RabbitMQ, or any other transport.
+
+            headers = slpy.get_propagation_headers()
+            # → {"X-Correlation-ID": "abc-123", "X-Trace-ID": "xyz-789"}
+
+            await httpx.get(url, headers=headers)
+            await kafka_producer.send(topic, headers=headers)
+        """
+        self._require_initialized()
+        ctx: Dict[str, Any] = self._context.get()
+        propagation: Dict[str, str] = self._config.context.propagation
+        result: Dict[str, str] = {}
+        for field_name, header_name in propagation.items():
+            value = ctx.get(field_name)
+            if value is not None:
+                result[header_name] = str(value)
+        return result
+
     def get_correlation_id(self) -> Optional[str]:
-        """
-        Return the correlation_id from the current context, or None if not set.
-
-        Useful when you need to forward the correlation_id to an outgoing
-        HTTP call or a message queue without going through a logger.
-
-            correlation_id = slpy.get_correlation_id()
-            headers = {"X-Correlation-ID": correlation_id} if correlation_id else {}
-        """
+        """Return the current correlation_id from context, or None."""
         self._require_initialized()
         return self._context.get().get("correlation_id")
 
-    def get_correlation_id_header_name(self) -> str:
-        """
-        Return the HTTP header name used for correlation_id propagation.
+    def get_trace_id(self) -> Optional[str]:
+        """Return the current trace_id from context, or None."""
+        self._require_initialized()
+        return self._context.get().get("trace_id")
 
-        Matches the correlation_header configured in SyntropyMiddleware
-        (default: 'X-Correlation-ID').
+    def get_session_id(self) -> Optional[str]:
+        """Return the current session_id from context, or None."""
+        self._require_initialized()
+        return self._context.get().get("session_id")
 
-            header_name = slpy.get_correlation_id_header_name()
-            correlation_id = request.headers.get(header_name)
+    def get_transaction_id(self) -> Optional[str]:
+        """Return the current transaction_id from context, or None."""
+        self._require_initialized()
+        return self._context.get().get("transaction_id")
+
+    def get_propagation_header_name(self, field_name: str) -> Optional[str]:
         """
-        try:
-            from slpy.fastapi import _correlation_header
-            return _correlation_header
-        except ImportError:
-            return "X-Correlation-ID"
+        Return the configured HTTP header name for a conceptual field.
+
+            slpy.get_propagation_header_name("correlation_id")
+            # → "X-Correlation-ID"
+
+            slpy.get_propagation_header_name("trace_id")
+            # → "X-B3-TraceId"  (if configured)
+        """
+        self._require_initialized()
+        return self._config.context.propagation.get(field_name)
 
     @property
     def is_initialized(self) -> bool:

@@ -152,6 +152,39 @@ async def test_get_correlation_id_clears_after_scope(sl):
 # get_correlation_id_header_name()
 # ------------------------------------------------------------------
 
-async def test_get_correlation_id_header_name_default(sl):
+async def test_get_propagation_header_name_default(sl):
     await sl.init({"logger": {"level": "info"}})
-    assert sl.get_correlation_id_header_name() == "X-Correlation-ID"
+    assert sl.get_propagation_header_name("correlation_id") == "X-Correlation-ID"
+    assert sl.get_propagation_header_name("trace_id") == "X-Trace-ID"
+    assert sl.get_propagation_header_name("session_id") == "X-Session-ID"
+    assert sl.get_propagation_header_name("transaction_id") == "X-Transaction-ID"
+
+
+async def test_get_propagation_headers_empty_when_no_context(sl):
+    await sl.init({"logger": {"level": "info"}})
+    assert sl.get_propagation_headers() == {}
+
+
+async def test_get_propagation_headers_returns_active_fields(sl):
+    await sl.init({"logger": {"level": "info"}})
+    async with sl.context(correlation_id="abc-123", trace_id="xyz-789"):
+        headers = sl.get_propagation_headers()
+        assert headers["X-Correlation-ID"] == "abc-123"
+        assert headers["X-Trace-ID"] == "xyz-789"
+        assert "X-Session-ID" not in headers  # not in context
+
+
+async def test_get_propagation_headers_custom_header_names(sl):
+    await sl.init({
+        "logger": {"level": "info"},
+        "context": {
+            "propagation": {
+                "correlation_id": "X-Request-ID",
+                "trace_id":       "X-B3-TraceId",
+            }
+        }
+    })
+    async with sl.context(correlation_id="abc-123", trace_id="xyz-789"):
+        headers = sl.get_propagation_headers()
+        assert headers["X-Request-ID"] == "abc-123"
+        assert headers["X-B3-TraceId"] == "xyz-789"
