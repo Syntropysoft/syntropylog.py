@@ -88,27 +88,25 @@ SLPY_NATIVE_DISABLE=1 py benchmark/bench.py --fast
 ## Stress test — official results (GitHub Actions, Ubuntu, Python 3.12)
 
 > 1M iterations per scenario, Rust addon active, null transport.
+> Two independent CI runs — max variance 4%, confirming stability.
 
 ```
-Simple log  (slpy.info — no masking payload)
-  1M    1.166s    85,774 logs/sec    11.66 µs/log    1.30 KB heap
-
-Complex log  (slpy.info + nested object — masking ON)
-  1M    2.988s    33,472 logs/sec    29.88 µs/log   11.30 KB heap
-
-MaskingEngine.process() only  (hot path isolation)
-  1M    1.684s    59,369 logs/sec    16.84 µs/log    4.03 KB heap
-
-child() + log  (new binding per iteration)
-  1M    1.719s    58,165 logs/sec    17.19 µs/log       0 B heap
-
-Async context scope  (open+close per iteration)
-  1M    4.497s    22,237 logs/sec    44.97 µs/log       0 B heap
-  10M  44.762s    22,340 logs/sec    44.76 µs/log       0 B heap
+                         Run 1        Run 2        avg µs/log
+Simple log               85,774       84,028       11.8
+MaskingEngine only       59,369       61,817       16.5
+child() + log            58,165       59,826       17.0  — 0 B heap
+Complex log + masking    33,472       33,484       29.9
+Async context scope      22,237       22,248       45.0  — 0 B heap
 ```
 
-**child() and async context scope allocate 0 bytes at 1M iterations** — no GC pressure.
-**Async context scope: zero degradation from 1M to 10M** (44.97 → 44.76 µs).
+**Async context scope — zero degradation from 1M to 10M:**
+```
+  Run 1:  1M → 44.97 µs   10M → 44.76 µs
+  Run 2:  1M → 44.95 µs   10M → 44.78 µs
+```
+
+**child() and async context scope allocate 0 bytes** at 1M iterations — no GC pressure.
+Results are consistent across runs to within 4% — numbers are stable and reproducible.
 
 ---
 
