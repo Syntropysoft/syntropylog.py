@@ -23,7 +23,7 @@ Quick start:
 """
 
 from .core import SyntropyLog
-from .transport import Transport, ConsoleTransport
+from .transport import Transport, ConsoleTransport, PrettyConsoleTransport
 from .masking import MaskingEngine, MaskingRule, MaskingStrategy
 from .logger import Logger
 
@@ -35,6 +35,7 @@ __all__ = [
     "SyntropyLog",
     "Transport",
     "ConsoleTransport",
+    "PrettyConsoleTransport",
     "MaskingEngine",
     "MaskingRule",
     "MaskingStrategy",
