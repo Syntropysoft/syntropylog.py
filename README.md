@@ -55,6 +55,7 @@ The `request_id` propagated automatically. The `email` was masked automatically.
 | Repeating `extra={"service": "payment"}` | `slpy.get_logger('payment-service')` | `service` field on every log from that logger |
 | Copying context into child functions | `logger.child(order_id='123')` | All bindings carried automatically on every subsequent call |
 | Routing compliance logs manually | `logger.with_meta({"regulation": "GDPR"})` | `meta` payload travels sanitized to all transports |
+| Writing a transport class per destination | `AdapterTransport(adapter=UniversalAdapter(executor=fn))` | Your executor receives the clean entry — connect to anything |
 
 ---
 
@@ -254,6 +255,57 @@ sl.set_level('error')   # back to quiet
 |-----------|--------|----------|
 | `ConsoleTransport` | Structured JSON | Production, CI, log collectors — **default** |
 | `PrettyConsoleTransport` | Colored human-readable | Local development |
+| `AdapterTransport` | Any destination | Databases, HTTP APIs, queues, multiple targets |
+
+### AdapterTransport + UniversalAdapter
+
+The most powerful routing primitive. You provide an `executor` function — sync or async — that receives the clean, already-masked log entry and sends it anywhere. slpy handles context propagation, masking, level filtering, error isolation, and fanout.
+
+```python
+from slpy import slpy, AdapterTransport, UniversalAdapter, ConsoleTransport
+
+async def my_executor(data: dict) -> None:
+    # One function. Any number of destinations. Fully async.
+    await asyncio.gather(
+        prisma.system_log.create(data=data),
+        mongo_collection.insert_one(data),
+        es.index(index='logs', body=data),
+    )
+
+db_transport = AdapterTransport(
+    name='db',
+    adapter=UniversalAdapter(executor=my_executor),
+    formatter=lambda e: {**e, 'timestamp': datetime.fromisoformat(e['timestamp'])},
+)
+
+await slpy.init({
+    'logger': {
+        'transports': [
+            db_transport,       # → Postgres + MongoDB + Elasticsearch
+            ConsoleTransport(), # → stdout
+        ],
+    },
+    'masking': {'enable_default_rules': True},
+})
+```
+
+When `my_executor` is called, the entry is already:
+- **Masked** — `email`, `password`, `token`, credit card fields scrubbed
+- **Context-enriched** — `request_id`, `user_id`, any `slpy.context()` fields attached
+- **Formatted** — optionally transformed by your `formatter` to match your DB schema
+
+The executor is the only thing you write. Connect to Postgres, MongoDB, Elasticsearch, Datadog, OpenTelemetry, Kafka, a REST API, or all of them at once — slpy does not know or care.
+
+**`formatter`** (optional) — transform the entry before it reaches the executor. Use it to map field names, convert types, or add schema-specific fields:
+
+```python
+def db_formatter(entry: dict) -> dict:
+    return {
+        **entry,
+        'timestamp': datetime.fromtimestamp(entry['timestamp'] / 1000),
+        'env': os.getenv('APP_ENV', 'production'),
+    }
+```
 
 ### PrettyConsoleTransport
 
@@ -292,7 +344,7 @@ PrettyConsoleTransport(colors=False)# force JSON (same as ConsoleTransport)
 
 ### Custom transports
 
-Extend `Transport` and implement `log(entry)` to route entries anywhere.
+For full control, extend `Transport` and implement `log(entry)`:
 
 ```python
 from slpy.transport import Transport
@@ -300,13 +352,9 @@ from slpy.transport import Transport
 class ElasticsearchTransport(Transport):
     def log(self, entry: dict) -> None:
         self._es_client.index(index='logs', body=entry)
-
-await slpy.init({
-    'logger': {
-        'transports': [ElasticsearchTransport()],
-    },
-})
 ```
+
+For most cases, `AdapterTransport` + `UniversalAdapter` is simpler — no subclassing needed.
 
 Multiple transports are supported — entries are sent to all of them.
 
@@ -414,6 +462,9 @@ uvicorn examples.06_fastapi_middleware:app --reload
 
 # PrettyConsoleTransport — colored output (run in a real terminal)
 py examples/07_pretty_console.py
+
+# AdapterTransport + UniversalAdapter — fanout to multiple destinations
+py examples/08_adapter_transport.py
 ```
 
 ## Running the tests
