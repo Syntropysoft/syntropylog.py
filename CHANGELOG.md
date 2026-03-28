@@ -112,9 +112,10 @@ Compared to ecosystem peers (pyperf, null transport, Windows):
 
 ### Testing
 
-- 45 tests across config, masking, context, logger, and core.
+- 77 tests across config, masking, context, logger, core, transports, adapter, and FastAPI middleware.
 - `CaptureTransport` pattern for asserting log output without I/O.
 - `pytest-asyncio` with `asyncio_mode = auto`.
+- 85% coverage. Uncovered lines are Rust addon paths (only active when `slpy-native` is installed) and silent observer `except` blocks.
 
 ### Examples
 
