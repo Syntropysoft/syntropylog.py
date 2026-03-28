@@ -1,0 +1,122 @@
+"""
+Logger for slpy.
+
+Named loggers with child() and with_meta() for declarative context binding.
+Synchronous hot path — no background workers, no queues.
+"""
+
+import time
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .masking import MaskingEngine
+    from .context import ContextManager
+    from .transport import Transport
+
+_LEVEL_ORDER = {"debug": 0, "info": 1, "warn": 2, "error": 3, "audit": 4, "silent": 99}
+
+
+class Logger:
+    """
+    A named logger. Create via slpy.get_logger(name).
+
+    Fluent API:
+        logger.child(order_id="123").info("Processing")
+        logger.with_meta({"ttl": 86400}).audit("Export complete")
+    """
+
+    def __init__(
+        self,
+        name: str,
+        level: str,
+        transports: List["Transport"],
+        masking: Optional["MaskingEngine"],
+        context_mgr: Optional["ContextManager"],
+        bindings: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        self._name = name
+        self._level = level
+        self._transports = transports
+        self._masking = masking
+        self._context_mgr = context_mgr
+        self._bindings: Dict[str, Any] = bindings or {}
+
+    # ------------------------------------------------------------------
+    # Fluent API
+    # ------------------------------------------------------------------
+
+    def child(self, **bindings: Any) -> "Logger":
+        """Return a new Logger with additional bound fields."""
+        return Logger(
+            name=self._name,
+            level=self._level,
+            transports=self._transports,
+            masking=self._masking,
+            context_mgr=self._context_mgr,
+            bindings={**self._bindings, **bindings},
+        )
+
+    def with_meta(self, payload: Dict[str, Any]) -> "Logger":
+        """
+        Attach arbitrary structured metadata to every log emitted by this logger.
+        The payload travels sanitized to all transports as logEntry['meta'].
+
+        Use cases:
+        - Audit routing:  .with_meta({"ttl": 90, "destination": "audit-log"})
+        - Compliance:     .with_meta({"regulation": "GDPR", "data_class": "PII"})
+        - Feature flags:  .with_meta({"experiment": "checkout-v2"})
+        """
+        return self.child(meta=payload)
+
+    # ------------------------------------------------------------------
+    # Log methods
+    # ------------------------------------------------------------------
+
+    def debug(self, message: str, **kwargs: Any) -> None:
+        self._emit("debug", message, **kwargs)
+
+    def info(self, message: str, **kwargs: Any) -> None:
+        self._emit("info", message, **kwargs)
+
+    def warn(self, message: str, **kwargs: Any) -> None:
+        self._emit("warn", message, **kwargs)
+
+    def error(self, message: str, **kwargs: Any) -> None:
+        self._emit("error", message, **kwargs)
+
+    def audit(self, message: str, **kwargs: Any) -> None:
+        """Audit level — always emitted regardless of the configured level."""
+        self._emit("audit", message, _force=True, **kwargs)
+
+    # ------------------------------------------------------------------
+    # Internal
+    # ------------------------------------------------------------------
+
+    def _should_emit(self, level: str) -> bool:
+        return _LEVEL_ORDER.get(level, 0) >= _LEVEL_ORDER.get(self._level, 1)
+
+    def _emit(self, level: str, message: str, _force: bool = False, **kwargs: Any) -> None:
+        if not _force and not self._should_emit(level):
+            return
+
+        # Build entry: context → bindings → kwargs (most specific wins)
+        ctx = self._context_mgr.get() if self._context_mgr else {}
+        entry: Dict[str, Any] = {
+            "level": level,
+            "message": message,
+            "timestamp": int(time.time() * 1000),
+            "service": self._name,
+            **ctx,
+            **self._bindings,
+            **kwargs,
+        }
+
+        # Apply masking
+        if self._masking:
+            entry = self._masking.process(entry)
+
+        for transport in self._transports:
+            try:
+                transport.log(entry)
+            except Exception:
+                pass  # Silent observer
