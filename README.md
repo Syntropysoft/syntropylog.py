@@ -288,7 +288,7 @@ await slpy.init({
             'kafka': {'correlation_id': 'correlationId', 'trace_id': 'traceId'},
             's3':    {'correlation_id': 'Correlation_ID'},
             'azure': {'correlation_id': 'CorrelationID',  'trace_id': 'TraceID'},
-            'myApi': {'my_custom_field':'other-name'}
+            'myApi': {'my_custom_field':'other-name', 'user_id': 'user_api'}
         },
     },
 })
