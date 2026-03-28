@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./assets/syntropysoft-logo.png" alt="SyntropySoft Logo" width="170"/>
+  <img src="https://syntropysoft.com/syntropylog-logo.png" alt="SyntropyLog Logo" width="170"/>
 </p>
 
 <h1 align="center">slpy</h1>
