@@ -58,7 +58,8 @@ async def test_outbound_event_headers_match_target_mapping():
         "logger": {"level": "info"},
         "observability": {"transports": [obs]},
         "context": {
-            "targets": {"s3": {"correlation_id": "Correlation_ID"}}
+            "propagation": {"correlation_id": "X-Correlation-ID"},
+            "targets": {"s3": {"correlation_id": "Correlation_ID"}},
         },
     })
     async with slpy.context(correlation_id="abc-123"):

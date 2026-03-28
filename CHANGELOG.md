@@ -4,6 +4,63 @@ All notable changes to slpy are documented here.
 
 ---
 
+## [0.3.0] — 2026-03-28
+
+### Breaking changes
+
+- **No built-in propagation defaults.** `context.propagation` is now empty by default.
+  In 0.2.0, four fields (`correlation_id`, `trace_id`, `session_id`, `transaction_id`)
+  were pre-configured with HTTP header names. Now you declare exactly the fields your
+  service needs — nothing is assumed.
+
+  ```python
+  # Before (0.2.0) — worked without any propagation config
+  # After (0.3.0) — must declare explicitly:
+  await slpy.init({
+      'context': {
+          'propagation': {
+              'correlation_id': 'X-Correlation-ID',
+          },
+      },
+  })
+  ```
+
+- **`get_correlation_id()`, `get_trace_id()`, `get_session_id()`, `get_transaction_id()` removed.**
+  Replaced by the generic `slpy.get(key)` method.
+
+  ```python
+  # Before
+  slpy.get_correlation_id()
+
+  # After
+  slpy.get('correlation_id')
+  ```
+
+- **`DEFAULT_PROPAGATION`, `FIELD_CORRELATION`, `FIELD_TRACE`, `FIELD_SESSION`,
+  `FIELD_TRANSACTION` removed.** These were framework opinions about naming. slpy provides
+  the mechanism — you declare the meaning. Define your own constants if you want IDE
+  autocompletion and typo safety (the `FIELD_` prefix in the docs is a suggestion, not
+  part of the framework).
+
+### New
+
+- **`slpy.get(key)`** — generic context accessor. Reads any field from the active context
+  by its conceptual name. Works with any string key, including your own custom fields.
+
+  ```python
+  slpy.get('correlation_id')   # -> 'req-001'
+  slpy.get('tenant_id')        # -> 'acme'
+  slpy.get('unknown')          # -> None
+  ```
+
+### Philosophy
+
+slpy provides the mechanism. You declare the meaning. No built-in opinions about what
+fields your service should propagate, what they should be called, or what wire names
+they should map to. One declaration in one file — the framework does the rest.
+
+---
+
 ## [0.2.0] — 2026-03-28
 
 ### Propagation headers

@@ -189,25 +189,16 @@ class SyntropyLog:
 
         return result
 
-    def get_correlation_id(self) -> Optional[str]:
-        """Return the current correlation_id from context, or None."""
-        self._require_initialized()
-        return self._context.get().get("correlation_id")
+    def get(self, field_name: str) -> Optional[str]:
+        """
+        Return the current value of any context field, or None.
 
-    def get_trace_id(self) -> Optional[str]:
-        """Return the current trace_id from context, or None."""
+            slpy.get(slpy.CORRELATION_ID)   # -> 'req-001'
+            slpy.get(slpy.TRACE_ID)         # -> 'trace-xyz'
+            slpy.get('tenant_id')           # -> works for any custom field too
+        """
         self._require_initialized()
-        return self._context.get().get("trace_id")
-
-    def get_session_id(self) -> Optional[str]:
-        """Return the current session_id from context, or None."""
-        self._require_initialized()
-        return self._context.get().get("session_id")
-
-    def get_transaction_id(self) -> Optional[str]:
-        """Return the current transaction_id from context, or None."""
-        self._require_initialized()
-        return self._context.get().get("transaction_id")
+        return self._context.get().get(field_name)
 
     def get_propagation_header_name(self, field_name: str) -> Optional[str]:
         """

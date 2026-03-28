@@ -269,32 +269,37 @@ Application code never sees wire names. It only works with conceptual names.
 
 ### Configuration
 
-`propagation` is a plain dictionary — the conceptual names shown below are just examples. You can use any names you want. The only rule is that the same conceptual name must appear in both `propagation` and `targets` so the framework knows which field to translate.
+No built-in defaults. You declare exactly the fields your service needs — nothing more, nothing less.
+
+The recommended pattern is to define your own constants in one place and use them as keys everywhere — config, targets, and accessors. This way a typo is caught by the IDE instead of failing silently at runtime. The `FIELD_` prefix in the examples below is just a naming convention — it is not part of slpy. Name your constants however you want.
 
 ```python
+# fields.py — one place, all your field definitions
+FIELD_CORRELATION = 'correlation_id'
+FIELD_TRACE       = 'trace_id'
+FIELD_TENANT      = 'tenant_id'
+FIELD_REQUEST     = 'request_id'
+```
+
+```python
+from myapp.fields import FIELD_CORRELATION, FIELD_TRACE, FIELD_TENANT, FIELD_REQUEST
+
 await slpy.init({
     'context': {
-        # Any conceptual name you choose -> wire name for HTTP (inbound + outbound)
         'propagation': {
-            'correlation_id': 'X-Correlation-ID',   # example — use any name
-            'trace_id':       'X-Trace-ID',          # example
-            'tenant_id':      'X-Tenant-ID',         # your own field
-            'request_id':     'X-Request-ID',        # your own field
-            'user_id':        'X-User-ID',           # your own field
-            'my_custom_field':'X-My-Header',         # whatever you fancy
+            FIELD_CORRELATION: 'X-Correlation-ID',
+            FIELD_TRACE:       'X-Trace-ID',
+            FIELD_TENANT:      'X-Tenant-ID',
+            FIELD_REQUEST:     'X-Request-ID',
         },
-        # Same conceptual names, different wire names per destination
         'targets': {
-            'kafka': {'correlation_id': 'correlationId', 'trace_id': 'traceId'},
-            's3':    {'correlation_id': 'Correlation_ID'},
-            'azure': {'correlation_id': 'CorrelationID',  'trace_id': 'TraceID'},
-            'myApi': {'my_custom_field':'other-name', 'user_id': 'user_api'}
+            'kafka': {FIELD_CORRELATION: 'correlationId', FIELD_TRACE: 'traceId'},
+            's3':    {FIELD_CORRELATION: 'Correlation_ID'},
+            'azure': {FIELD_CORRELATION: 'CorrelationID', FIELD_TRACE: 'TraceID'},
+            'myApi': {FIELD_TENANT: 'tenant', FIELD_REQUEST: 'reqId'},
         },
     },
 })
-```
-
-The four defaults (`correlation_id`, `trace_id`, `session_id`, `transaction_id`) are pre-configured — you only declare what you need to add or change. `targets` is empty by default.
 
 ### Usage
 
@@ -322,12 +327,17 @@ Only fields that have a value in the active context appear in the result.
 
 **Context accessors**
 
+`slpy.get(key)` reads any field from the active context by its conceptual name.
+
 ```python
-slpy.get_correlation_id()               # -> 'req-001'
-slpy.get_trace_id()                     # -> 'trace-xyz'
-slpy.get_session_id()                   # -> None (if not in context)
-slpy.get_transaction_id()               # -> None
-slpy.get_propagation_header_name('correlation_id')  # -> 'X-Correlation-ID'
+from myapp.fields import FIELD_CORRELATION, FIELD_TRACE, FIELD_TENANT
+
+slpy.get(FIELD_CORRELATION)                          # -> 'req-001'
+slpy.get(FIELD_TRACE)                                # -> 'trace-xyz'
+slpy.get(FIELD_TENANT)                               # -> 'acme'
+
+slpy.get_propagation_header_name(FIELD_CORRELATION)  # -> 'X-Correlation-ID'
+slpy.get_propagation_header_name(FIELD_TENANT)       # -> 'X-Tenant-ID'
 ```
 
 ---

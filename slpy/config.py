@@ -15,13 +15,8 @@ class LoggerConfig:
     transports: List[Any] = field(default_factory=list)
 
 
-# Default propagation — conceptual name → HTTP header name (inbound + default outbound)
-_DEFAULT_PROPAGATION: Dict[str, str] = {
-    "correlation_id": "X-Correlation-ID",
-    "trace_id":       "X-Trace-ID",
-    "session_id":     "X-Session-ID",
-    "transaction_id": "X-Transaction-ID",
-}
+# No built-in defaults — the developer declares the propagation mapping explicitly.
+_DEFAULT_PROPAGATION: Dict[str, str] = {}
 
 
 @dataclass

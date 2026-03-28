@@ -127,37 +127,50 @@ async def test_set_level_affects_existing_loggers(sl):
 
 
 # ------------------------------------------------------------------
-# get_correlation_id()
+# get()
 # ------------------------------------------------------------------
 
-async def test_get_correlation_id_returns_none_when_not_set(sl):
+async def test_get_returns_none_when_not_set(sl):
     await sl.init({"logger": {"level": "info"}})
-    assert sl.get_correlation_id() is None
+    assert sl.get("correlation_id") is None
 
 
-async def test_get_correlation_id_returns_value_from_context(sl):
+async def test_get_returns_value_from_context(sl):
     await sl.init({"logger": {"level": "info"}})
     async with sl.context(correlation_id="req-abc-123"):
-        assert sl.get_correlation_id() == "req-abc-123"
+        assert sl.get("correlation_id") == "req-abc-123"
 
 
-async def test_get_correlation_id_clears_after_scope(sl):
+async def test_get_clears_after_scope(sl):
     await sl.init({"logger": {"level": "info"}})
     async with sl.context(correlation_id="req-abc-123"):
         pass
-    assert sl.get_correlation_id() is None
+    assert sl.get("correlation_id") is None
+
+
+async def test_get_works_with_custom_field(sl):
+    await sl.init({"logger": {"level": "info"}})
+    async with sl.context(tenant_id="acme"):
+        assert sl.get("tenant_id") == "acme"
 
 
 # ------------------------------------------------------------------
 # get_correlation_id_header_name()
 # ------------------------------------------------------------------
 
-async def test_get_propagation_header_name_default(sl):
-    await sl.init({"logger": {"level": "info"}})
+async def test_get_propagation_header_name_configured(sl):
+    await sl.init({
+        "logger": {"level": "info"},
+        "context": {
+            "propagation": {
+                "correlation_id": "X-Correlation-ID",
+                "trace_id":       "X-Trace-ID",
+            }
+        }
+    })
     assert sl.get_propagation_header_name("correlation_id") == "X-Correlation-ID"
     assert sl.get_propagation_header_name("trace_id") == "X-Trace-ID"
-    assert sl.get_propagation_header_name("session_id") == "X-Session-ID"
-    assert sl.get_propagation_header_name("transaction_id") == "X-Transaction-ID"
+    assert sl.get_propagation_header_name("session_id") is None  # not declared
 
 
 async def test_get_propagation_headers_empty_when_no_context(sl):
@@ -166,12 +179,20 @@ async def test_get_propagation_headers_empty_when_no_context(sl):
 
 
 async def test_get_propagation_headers_returns_active_fields(sl):
-    await sl.init({"logger": {"level": "info"}})
+    await sl.init({
+        "logger": {"level": "info"},
+        "context": {
+            "propagation": {
+                "correlation_id": "X-Correlation-ID",
+                "trace_id":       "X-Trace-ID",
+            }
+        }
+    })
     async with sl.context(correlation_id="abc-123", trace_id="xyz-789"):
         headers = sl.get_propagation_headers()
         assert headers["X-Correlation-ID"] == "abc-123"
         assert headers["X-Trace-ID"] == "xyz-789"
-        assert "X-Session-ID" not in headers  # not in context
+        assert "X-Session-ID" not in headers  # not declared
 
 
 async def test_get_propagation_headers_custom_header_names(sl):
@@ -194,11 +215,9 @@ async def test_get_propagation_headers_kafka_target(sl):
     await sl.init({
         "logger": {"level": "info"},
         "context": {
+            "propagation": {"correlation_id": "X-Correlation-ID", "trace_id": "X-Trace-ID"},
             "targets": {
-                "kafka": {
-                    "correlation_id": "correlationId",
-                    "trace_id":       "traceId",
-                }
+                "kafka": {"correlation_id": "correlationId", "trace_id": "traceId"},
             }
         }
     })
@@ -212,11 +231,9 @@ async def test_get_propagation_headers_s3_target(sl):
     await sl.init({
         "logger": {"level": "info"},
         "context": {
+            "propagation": {"correlation_id": "X-Correlation-ID", "trace_id": "X-Trace-ID"},
             "targets": {
-                "s3": {
-                    "correlation_id": "Correlation_ID",
-                    "trace_id":       "Trace_ID",
-                }
+                "s3": {"correlation_id": "Correlation_ID", "trace_id": "Trace_ID"},
             }
         }
     })
@@ -230,6 +247,7 @@ async def test_get_propagation_headers_multiple_targets(sl):
     await sl.init({
         "logger": {"level": "info"},
         "context": {
+            "propagation": {"correlation_id": "X-Correlation-ID"},
             "targets": {
                 "kafka": {"correlation_id": "correlationId"},
                 "azure": {"correlation_id": "CorrelationID"},
@@ -245,7 +263,10 @@ async def test_get_propagation_headers_multiple_targets(sl):
 
 
 async def test_get_propagation_headers_unknown_target_uses_field_name(sl):
-    await sl.init({"logger": {"level": "info"}})
+    await sl.init({
+        "logger": {"level": "info"},
+        "context": {"propagation": {"correlation_id": "X-Correlation-ID"}},
+    })
     async with sl.context(correlation_id="abc-123"):
         headers = sl.get_propagation_headers("unknown-target")
         assert headers["correlation_id"] == "abc-123"

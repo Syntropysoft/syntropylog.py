@@ -33,6 +33,9 @@ def make_app(transport: CaptureTransport) -> FastAPI:
     async def lifespan(app: FastAPI):
         await slpy.init({
             "logger": {"level": "debug", "transports": [transport]},
+            "context": {
+                "propagation": {"correlation_id": "X-Correlation-ID"},
+            },
         })
         yield
         await slpy.shutdown()

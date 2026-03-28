@@ -9,10 +9,7 @@ def test_defaults():
     assert cfg.logger.level == "info"
     assert cfg.logger.transports == []
     assert cfg.masking.enable_default_rules is True
-    assert cfg.context.propagation["correlation_id"] == "X-Correlation-ID"
-    assert cfg.context.propagation["trace_id"] == "X-Trace-ID"
-    assert cfg.context.propagation["session_id"] == "X-Session-ID"
-    assert cfg.context.propagation["transaction_id"] == "X-Transaction-ID"
+    assert cfg.context.propagation == {}   # no built-in defaults — developer declares explicitly
     assert cfg.context.custom_headers == []
 
 
@@ -44,7 +41,7 @@ def test_env_override(monkeypatch):
     assert cfg.logger.level == "error"
 
 
-def test_custom_propagation_overrides_default():
+def test_custom_propagation():
     cfg = ConfigManager({
         "context": {
             "propagation": {
@@ -55,9 +52,7 @@ def test_custom_propagation_overrides_default():
     })
     assert cfg.context.propagation["correlation_id"] == "X-Request-ID"
     assert cfg.context.propagation["trace_id"] == "X-B3-TraceId"
-    # defaults not overridden remain
-    assert cfg.context.propagation["session_id"] == "X-Session-ID"
-    assert cfg.context.propagation["transaction_id"] == "X-Transaction-ID"
+    assert "session_id" not in cfg.context.propagation
 
 
 def test_custom_headers_config():
