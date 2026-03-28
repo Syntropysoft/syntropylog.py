@@ -43,6 +43,14 @@ class ContextConfig:
 
 
 @dataclass
+class ObservabilityConfig:
+    # ObservabilityTransport instances — default: ConsoleObservabilityTransport
+    transports: List[Any] = field(default_factory=list)
+    # Whether to emit outbound events automatically on get_propagation_headers()
+    enabled: bool = True
+
+
+@dataclass
 class MaskingConfig:
     enable_default_rules: bool = True
     rules: List[Dict[str, Any]] = field(default_factory=list)
@@ -54,6 +62,7 @@ class Config:
     logger: LoggerConfig = field(default_factory=LoggerConfig)
     context: ContextConfig = field(default_factory=ContextConfig)
     masking: MaskingConfig = field(default_factory=MaskingConfig)
+    observability: ObservabilityConfig = field(default_factory=ObservabilityConfig)
 
 
 class ConfigManager:
@@ -67,6 +76,8 @@ class ConfigManager:
         propagation = dict(_DEFAULT_PROPAGATION)
         if "propagation" in context_raw:
             propagation.update(context_raw["propagation"])
+
+        obs_raw = raw.get("observability", {})
 
         self._config = Config(
             logger=LoggerConfig(
@@ -82,6 +93,10 @@ class ConfigManager:
                 enable_default_rules=masking_raw.get("enable_default_rules", True),
                 rules=masking_raw.get("rules", []),
                 max_depth=masking_raw.get("max_depth", 10),
+            ),
+            observability=ObservabilityConfig(
+                transports=obs_raw.get("transports", []),
+                enabled=obs_raw.get("enabled", True),
             ),
         )
 
@@ -104,3 +119,7 @@ class ConfigManager:
     @property
     def masking(self) -> MaskingConfig:
         return self._config.masking
+
+    @property
+    def observability(self) -> ObservabilityConfig:
+        return self._config.observability

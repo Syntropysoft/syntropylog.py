@@ -11,6 +11,7 @@ from .config import ConfigManager
 from .context import ContextManager
 from .logger import Logger
 from .masking import MaskingEngine, MaskingRule, MaskingStrategy
+from .observability import ConsoleObservabilityTransport, ObservabilityEngine, OutboundEvent
 from .transport import ConsoleTransport, Transport
 
 
@@ -30,6 +31,7 @@ class SyntropyLog:
         self._context: Optional[ContextManager] = None
         self._masking: Optional[MaskingEngine] = None
         self._transports: list = []
+        self._observability: Optional[ObservabilityEngine] = None
         self._loggers: Dict[str, Logger] = {}
 
     async def init(self, config: Optional[Dict[str, Any]] = None) -> None:
@@ -73,6 +75,13 @@ class SyntropyLog:
         configured = cfg.logger.transports
         self._transports = list(configured) if configured else [ConsoleTransport()]
 
+        # Observability — fall back to ConsoleObservabilityTransport if none provided
+        obs_cfg = cfg.observability
+        obs_transports = list(obs_cfg.transports) if obs_cfg.transports else [ConsoleObservabilityTransport()]
+        self._observability = ObservabilityEngine(
+            transports=obs_transports if obs_cfg.enabled else []
+        )
+
         self._initialized = True
 
     async def shutdown(self) -> None:
@@ -82,6 +91,7 @@ class SyntropyLog:
         self._context = None
         self._masking = None
         self._transports = []
+        self._observability = None
         self._loggers = {}
 
     # ------------------------------------------------------------------
@@ -167,6 +177,15 @@ class SyntropyLog:
                 if value is not None:
                     key = target_map.get(field_name, field_name)
                     result[key] = str(value)
+
+        # Emit outbound event — trazability of context leaving the service
+        ctx: Dict[str, Any] = self._context.get()
+        self._observability.record(OutboundEvent(
+            target=target or "http",
+            headers=result,
+            correlation_id=ctx.get("correlation_id"),
+            trace_id=ctx.get("trace_id"),
+        ))
 
         return result
 

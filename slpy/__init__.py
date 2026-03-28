@@ -25,6 +25,7 @@ Quick start:
 from .core import SyntropyLog
 from .transport import Transport, ConsoleTransport, PrettyConsoleTransport, UniversalAdapter, AdapterTransport
 from .masking import MaskingEngine, MaskingRule, MaskingStrategy
+from .observability import ObservabilityTransport, ConsoleObservabilityTransport, OutboundEvent
 from .logger import Logger
 
 # Pre-built singleton — import and use directly
@@ -41,6 +42,9 @@ __all__ = [
     "MaskingEngine",
     "MaskingRule",
     "MaskingStrategy",
+    "ObservabilityTransport",
+    "ConsoleObservabilityTransport",
+    "OutboundEvent",
     "Logger",
 ]
 
