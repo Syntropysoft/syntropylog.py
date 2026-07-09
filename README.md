@@ -17,6 +17,27 @@
   <a href="#"><img src="https://img.shields.io/badge/dependencies-zero-brightgreen.svg" alt="Zero dependencies"></a>
 </p>
 
+<p align="center">
+  slpy is the Python member of the SyntropyLog family — same declarative model, three runtimes:
+  <a href="https://www.npmjs.com/package/syntropylog"><strong>SyntropyLog</strong></a> (Node.js) ·
+  <a href="https://www.nuget.org/packages/sl4n/"><strong>sl4n</strong></a> (.NET) ·
+  <strong>slpy</strong> (Python)
+</p>
+
+---
+
+## What's new in 0.4.0
+
+- **Logging Matrix** — a per-level whitelist of context fields, declared once. [Section ›](#logging-matrix)
+- **Retention policies** — named compliance policies (`with_retention('SOX_AUDIT_TRAIL')`) stamped on every tagged entry. [Section ›](#retention-policies)
+- **DurableFileTransport** — audit delivery that survives backend outages AND process restarts, via a self-emptying disk spool. [Section ›](#durable-delivery--durablefiletransport)
+- **Masking hardened, in BOTH engines (Python + Rust)** — non-string values and nested objects under a sensitive key are now masked (`password=12345` and `password={'hash': ...}` no longer leak); lists are no longer corrupted by the masking pass; `MASK_KEYS` aliases + `mask_pattern()`; `on_masking_error` hook; on failure the entry degrades to a safe payload — raw metadata never leaks.
+- **Safety boundary** — ANSI/control characters stripped from every string before transports (log-injection defense); `on_log_failure` hook; `slpy.get_stats()` health counters.
+- **Testing toolkit** — `slpy.testing.SpyTransport` for asserting on emitted (and masked) entries.
+- **Timestamps are now ISO-8601** with milliseconds and offset (was epoch-ms) — the same format as SyntropyLog and sl4n.
+
+Details: [CHANGELOG.md](CHANGELOG.md).
+
 ---
 
 ## What is slpy?
@@ -54,7 +75,8 @@ The `request_id` propagated automatically. The `email` was masked automatically.
 | Scrubbing sensitive fields before logging | `masking: {enable_default_rules: True}` | Masks email, password, token, credit card on every log |
 | Repeating `extra={"service": "payment"}` | `slpy.get_logger('payment-service')` | `service` field on every log from that logger |
 | Copying context into child functions | `logger.child(order_id='123')` | All bindings carried automatically on every subsequent call |
-| Routing compliance logs manually | `logger.with_meta({"regulation": "GDPR"})` | `meta` payload travels sanitized to all transports |
+| Filtering noisy context per level | `logging_matrix: {'info': [...], 'error': ['*']}` | Only whitelisted context fields reach a transport at each level |
+| Routing compliance logs manually | `logger.with_retention('SOX_AUDIT_TRAIL')` | `retention` / `retention_class` / `retention_days` stamped on every entry |
 | Writing a transport class per destination | `AdapterTransport(adapter=UniversalAdapter(executor=fn))` | Your executor receives the clean entry — connect to anything |
 | Manually building headers per destination | `context.targets: {kafka: {...}, s3: {...}}` | `get_propagation_headers("kafka")` returns the right key names |
 | Adding tracing calls before every outbound call | `observability: {transports: [...]}` | `OutboundEvent` emitted automatically on every `get_propagation_headers()` |
@@ -133,9 +155,49 @@ Concurrent requests are fully isolated. Each `async with slpy.context(...)` open
 
 ---
 
+## Logging Matrix
+
+A declarative whitelist deciding **which context fields appear at each log level**. A context field not whitelisted for a level never reaches a transport. Compliance reviews the matrix, not your codebase.
+
+```python
+await slpy.init({
+    'logging_matrix': {
+        'default': ['request_id'],                       # any level not listed
+        'info':    ['request_id', 'user_id', 'operation'],
+        'error':   ['*'],                                # '*' = every context field
+    },
+})
+
+async with slpy.context(request_id='req-7', user_id='u-1', tenant_id='acme'):
+    logger.info('Payment captured')
+    # → request_id, user_id  (tenant_id dropped — not in the info whitelist)
+    logger.error('Payment failed')
+    # → request_id, user_id, tenant_id  ('*' lets everything through)
+```
+
+**The matrix governs context, not per-call data.** Core fields (`level`, `message`, `service`, `timestamp`), `child()` bindings and per-call kwargs are always emitted (and masked) — if you don't want a per-call field logged, don't pass it. The matrix exists for the auto-propagating context you *can't* trim at each call site.
+
+Semantics (identical across the family):
+
+1. No `logging_matrix` configured → every context field passes (nothing changes).
+2. Level listed → only those fields pass.
+3. Level not listed → the `default` entry applies.
+4. Neither the level nor `default` exist → **all context is dropped** for that level. Strict whitelist — always define `default`.
+5. A list containing `'*'` → every context field passes at that level.
+
+Change it at runtime — only field visibility changes; masking, levels and transports stay as set at `init()`:
+
+```python
+slpy.reconfigure_logging_matrix({'default': ['request_id'], 'error': ['*']})
+```
+
+---
+
 ## Data masking
 
-Masking runs automatically on every log entry. Default rules cover the most common sensitive fields. The engine flattens nested objects, applies rules by field name, then reconstructs the original structure — at any depth.
+Masking runs automatically on every log entry, before any transport. Rules match **field names** at any depth; once a key matches, everything beneath it is masked — nested dicts, lists, and non-string scalars included.
+
+> **Masking is by field name, never free text.** It masks the value of fields whose *key* matches a rule; it does **not** scan message text or string contents for PII. Put sensitive data in keyed fields — log-data quality is the caller's responsibility.
 
 ```python
 await slpy.init({
@@ -156,7 +218,27 @@ logger.info('User', email='john@example.com', name='John Doe')
 
 logger.info('Order', order={'user': {'token': 'abc123', 'id': 'USR-1'}})
 # → order.user.token: "******"   order.user.id: "USR-1" (not masked)
+
+# Non-strings and nested structures under a sensitive key are masked too:
+logger.info('Login', password=12345)             # → password: "*****"
+logger.info('Auth', password={'hash': 'abc'})    # → password.hash: "***"
 ```
+
+**One rule set, two engines, identical output.** If the optional Rust addon (`slpy-native`) is installed, masking runs in Rust; otherwise in pure Python. Both engines share the same semantics, locked by a byte-for-byte parity test fixture — the same discipline the Node.js sibling adopted after a native/JS divergence leaked PII (its KNOWN-ISSUES #2).
+
+Build custom rules from the grouped key aliases instead of string literals (keeps patterns out of secret scanners):
+
+```python
+from slpy import MASK_KEYS, mask_pattern
+
+'masking': {
+    'rules': [
+        {'pattern': mask_pattern(*MASK_KEYS['token']), 'strategy': 'token'},
+    ],
+}
+```
+
+**Failsafe.** Masking never throws. If it fails, the failure is counted (`slpy.get_stats().masking_failures`), reported through the optional `masking.on_masking_error` hook, and the entry degrades to a safe payload (`level`/`timestamp`/`message`/`service` + `_masking_failed: True`) — the raw metadata never leaks. Rules only ever run against field names (capped at 256 chars), never values, which bounds regex evaluation by construction.
 
 **Default rules**
 
@@ -207,6 +289,33 @@ logger.audit('visible')  # always emitted
 | Compliance tagging | `{"regulation": "GDPR", "data_class": "PII"}` |
 | Experiment tracking | `{"experiment": "checkout-v2", "variant": "B"}` |
 | Release context | `{"version": "1.4.0", "deploy_id": "d-001"}` |
+
+---
+
+## Retention policies
+
+Compliance metadata as data: declare named policies once, tag loggers with `with_retention(name)`, and every tagged entry carries the policy — so your transport can route and expire it by rule. slpy attaches the metadata; storage and expiry are the transport's job.
+
+```python
+await slpy.init({
+    'retention_policies': {
+        'SOX_AUDIT_TRAIL': {'days': 2555, 'class': 'SOX'},   # 7 years
+        'GDPR_ACCESS':     {'days': 90,   'class': 'GDPR'},
+    },
+})
+
+audit = slpy.get_logger('payments').with_retention('SOX_AUDIT_TRAIL')
+audit.audit('Manager override', user_id='u-1')
+# → retention: "SOX_AUDIT_TRAIL"  retention_class: "SOX"  retention_days: 2555
+#   level: "audit"  user_id: "u-1"
+```
+
+- The stamped fields are **never filtered by the Logging Matrix** — they are bindings, not context.
+- An unregistered name still stamps `retention` — compliance intent is never silently dropped.
+- Inline policies work without a registry entry: `with_retention({'days': 30, 'class': 'PCI'})`.
+- Composes with the rest of the fluent API: `logger.child(...).with_retention(...).with_meta(...)`.
+
+Pair it with `DurableFileTransport` (below) so tagged entries are also *delivered* with guarantees.
 
 ---
 
@@ -455,6 +564,7 @@ sl.set_level('error')   # back to quiet
 | `ConsoleTransport` | Structured JSON | Production, CI, log collectors — **default** |
 | `PrettyConsoleTransport` | Colored human-readable | Local development |
 | `AdapterTransport` | Any destination | Databases, HTTP APIs, queues, multiple targets |
+| `DurableFileTransport` | Wraps any of the above | Audit logs that must survive outages and restarts |
 
 ### AdapterTransport + UniversalAdapter
 
@@ -501,7 +611,7 @@ The executor is the only thing you write. Connect to Postgres, MongoDB, Elastics
 def db_formatter(entry: dict) -> dict:
     return {
         **entry,
-        'timestamp': datetime.fromtimestamp(entry['timestamp'] / 1000),
+        'timestamp': datetime.fromisoformat(entry['timestamp']),
         'env': os.getenv('APP_ENV', 'production'),
     }
 ```
@@ -556,6 +666,88 @@ class ElasticsearchTransport(Transport):
 For most cases, `AdapterTransport` + `UniversalAdapter` is simpler — no subclassing needed.
 
 Multiple transports are supported — entries are sent to all of them.
+
+### Durable delivery — DurableFileTransport
+
+Fire-and-forget is the right default for `info`/`warn` — and exactly wrong for audit entries a compliance auditor will ask for. `DurableFileTransport` wraps any transport with a durability **buffer** (not an archive):
+
+**When does it write to disk?** Only during an outage — these are the exact conditions:
+
+1. **Happy path (inner transport works):** entries go straight through. **Nothing touches disk.**
+2. **The inner transport raises:** the entry is appended to the spool file (JSONL, order preserved). Every following entry is spooled too.
+3. **Each new log probes recovery:** when the inner transport accepts entries again, the backlog drains in order.
+4. **Backlog fully drained:** the spool file **deletes itself**. No rotation, no archive, no cleanup to maintain.
+5. **Process crash/restart during an outage:** the leftover spool is recovered when the transport is constructed — delivery resumes automatically.
+
+```python
+from slpy import slpy, AdapterTransport, DurableFileTransport, UniversalAdapter
+
+durable = DurableFileTransport(
+    inner=AdapterTransport(
+        name='audit',
+        # Idempotent executor: at-least-once delivery means a crash
+        # mid-delivery re-sends — upsert by a unique id you control.
+        adapter=UniversalAdapter(executor=lambda e: audit_store.upsert(e['event_id'], e)),
+    ),
+    spool_path='/var/log/app/audit-spool.jsonl',   # LOCAL disk — the net, not the destination
+)
+
+await slpy.init({'logger': {'transports': [durable]}})
+slpy.get_logger('payments').with_retention('SOX_AUDIT_TRAIL').audit(
+    'Card charged', event_id='evt-1', order_id='o-1',
+)
+```
+
+Same design as sl4n's `DurableFileTransport` and the spirit of SyntropyLog's `DurableAdapterTransport` + `persistPath`.
+
+---
+
+## Self-observability and the safety boundary
+
+The pipeline survives every failure silently (a logging framework must never crash your app). `get_stats()` is how you **see** those survivals — read it from a health endpoint:
+
+```python
+stats = slpy.get_stats()
+stats.logs_processed      # entries emitted
+stats.transport_failures  # transport.log() raised (isolated, healthy sinks unaffected)
+stats.masking_failures    # masking failed (safe payload emitted instead)
+stats.uptime_seconds
+stats.native_active       # True when the Rust masking engine is in use
+```
+
+Hooks, for when counters aren't enough — both are guarded (a broken hook can't break logging):
+
+```python
+await slpy.init({
+    'logger':  {'on_log_failure': lambda exc, transport: alert(exc)},
+    'masking': {'on_masking_error': lambda exc: alert(exc)},   # never receives the raw payload
+})
+```
+
+**Log-injection defense:** ANSI escape sequences and control characters are stripped from every string value before transports — a crafted `user_agent` can't fake a log line, clear an operator's terminal, or smuggle escape codes into a log viewer.
+
+---
+
+## Testing your code
+
+`slpy.testing.SpyTransport` captures every emitted entry — including masking output — so tests assert on what would actually leave the process:
+
+```python
+from slpy.testing import SpyTransport
+
+spy = SpyTransport()
+await slpy.init({'logger': {'transports': [spy]}})
+
+...exercise your code...
+
+assert spy.count == 2
+assert spy.last_entry['level'] == 'audit'
+assert spy.at_level('error') == []
+assert spy.with_field('order_id', 'o-1')
+assert spy.any_message_contains('info', 'charged')
+assert spy.first_entry['password'] == '*******'   # masking already applied
+spy.clear()
+```
 
 ---
 

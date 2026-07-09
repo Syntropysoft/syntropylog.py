@@ -4,6 +4,67 @@ All notable changes to slpy are documented here.
 
 ---
 
+## [0.4.0] — 2026-07-09
+
+Parity release: slpy now covers the same conceptual surface as its siblings —
+SyntropyLog (Node.js) and sl4n (.NET).
+
+### Added
+
+- **Logging Matrix** (`logging_matrix` config + `slpy.reconfigure_logging_matrix()`):
+  a per-level whitelist of context fields. `default` fallback, `'*'` wildcard,
+  strict-whitelist semantics. Filters only the auto-propagating context — core
+  fields, `child()` bindings and per-call kwargs are never filtered.
+- **Retention policies** (`retention_policies` config + `logger.with_retention(name)`):
+  named compliance policies stamped as `retention` / `retention_class` /
+  `retention_days` on every tagged entry. Inline `{'days', 'class'}` dicts work
+  without a registry entry; an unregistered name still stamps `retention`.
+  Stamps bypass the Logging Matrix (they are bindings, not context).
+- **DurableFileTransport**: wraps any transport with a self-emptying disk spool.
+  Happy path never touches disk; an outage spools the undelivered backlog to
+  JSONL (order preserved); subsequent logs probe recovery and drain; the file
+  deletes itself when drained; a leftover spool is recovered on construction
+  (restart survival). Delivery is at-least-once — keep the executor idempotent.
+- **Safety boundary**: ANSI escape sequences and control characters are stripped
+  from every string value before transports (log-injection defense).
+- **`slpy.get_stats()`**: pipeline health counters — `logs_processed`,
+  `transport_failures`, `masking_failures`, `uptime_seconds`, `native_active`.
+- **Hooks**: `logger.on_log_failure(exc, transport)` and
+  `masking.on_masking_error(exc)` — both guarded; a broken hook can't break logging.
+- **`MASK_KEYS` + `mask_pattern()`**: grouped sensitive-key aliases for building
+  custom rules without string literals (the family's `maskEnum` / `MaskKeys`).
+- **Testing toolkit**: `slpy.testing.SpyTransport` — `entries`, `count`,
+  `first_entry` / `last_entry`, `clear()`, `at_level()`, `with_field()`,
+  `any_message_contains()`. Captures post-masking output.
+
+### Fixed (PII / data-integrity — in BOTH engines, Python and Rust)
+
+- **Non-string values under a sensitive key leaked unmasked** (`password=12345`).
+  Now stringified and masked by the matching strategy.
+- **Nested structures under a sensitive key leaked unmasked**
+  (`password={'hash': ...}`). Rules now inherit down the tree: once a key
+  matches, everything beneath it is masked; a deeper matching key overrides.
+- **Lists were corrupted to dicts** (`[1,2,3]` → `{'0':1,...}`) by the
+  flatten/unflatten round-trip. Both engines are now a pure recursive walk
+  that preserves structure.
+- **Masking failure no longer returns the raw payload.** On failure the entry
+  degrades to a safe payload (`_masking_failed: True` + core fields only).
+- Native `add_rule` patterns are now case-insensitive, matching Python.
+- A shared parity fixture (`tests/test_masking_parity.py`) asserts both engines
+  byte-identical — the regression lock against engine drift.
+
+### Changed
+
+- **Timestamps are ISO-8601** with milliseconds and offset
+  (`2026-07-09T14:00:00.123+00:00`) — the family format. Previously epoch-ms
+  int. `PrettyConsoleTransport` renders both; if your executor/formatter
+  parsed the epoch number, switch to `datetime.fromisoformat(entry['timestamp'])`.
+- Masking depth is bounded by `masking.max_depth` (default 10, now actually
+  enforced). At the boundary, values under a sensitive key are replaced by a
+  fixed-width mask; values outside pass unchanged.
+
+---
+
 ## [0.3.2] — 2026-03-28
 
 ### Breaking changes
