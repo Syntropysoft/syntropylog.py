@@ -45,6 +45,8 @@ class Config:
     context: ContextConfig = field(default_factory=ContextConfig)
     masking: MaskingConfig = field(default_factory=MaskingConfig)
     observability: ObservabilityConfig = field(default_factory=ObservabilityConfig)
+    # Per-level whitelist of context fields: {'default': [...], 'info': [...], 'error': ['*']}
+    logging_matrix: Dict[str, List[str]] = field(default_factory=dict)
 
 
 class ConfigManager:
@@ -75,6 +77,7 @@ class ConfigManager:
                 transports=obs_raw.get("transports", []),
                 enabled=obs_raw.get("enabled", True),
             ),
+            logging_matrix=raw.get("logging_matrix", {}),
         )
 
     def validate(self) -> None:
@@ -100,3 +103,7 @@ class ConfigManager:
     @property
     def observability(self) -> ObservabilityConfig:
         return self._config.observability
+
+    @property
+    def logging_matrix(self) -> Dict[str, List[str]]:
+        return self._config.logging_matrix

@@ -25,6 +25,7 @@ Quick start:
 from .core import SyntropyLog
 from .transport import Transport, ConsoleTransport, PrettyConsoleTransport, UniversalAdapter, AdapterTransport
 from .masking import MaskingEngine, MaskingRule, MaskingStrategy
+from .matrix import LoggingMatrix
 from .observability import ObservabilityTransport, ConsoleObservabilityTransport, OutboundEvent
 from .logger import Logger
 
@@ -42,6 +43,7 @@ __all__ = [
     "MaskingEngine",
     "MaskingRule",
     "MaskingStrategy",
+    "LoggingMatrix",
     "ObservabilityTransport",
     "ConsoleObservabilityTransport",
     "OutboundEvent",

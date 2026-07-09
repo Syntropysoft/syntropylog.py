@@ -11,6 +11,7 @@ from .config import ConfigManager
 from .context import ContextManager
 from .logger import Logger
 from .masking import MaskingEngine, MaskingRule, MaskingStrategy
+from .matrix import LoggingMatrix
 from .observability import ConsoleObservabilityTransport, ObservabilityEngine, OutboundEvent
 from .transport import ConsoleTransport, Transport
 
@@ -33,6 +34,7 @@ class SyntropyLog:
         self._transports: list = []
         self._observability: Optional[ObservabilityEngine] = None
         self._loggers: Dict[str, Logger] = {}
+        self._matrix: Optional[LoggingMatrix] = None
 
     async def init(self, config: Optional[Dict[str, Any]] = None) -> None:
         """
@@ -54,6 +56,9 @@ class SyntropyLog:
 
         # Context
         self._context = ContextManager()
+
+        # Logging Matrix — per-level whitelist of context fields
+        self._matrix = LoggingMatrix.create(cfg.logging_matrix)
 
         # Masking
         masking_cfg = cfg.masking
@@ -93,6 +98,7 @@ class SyntropyLog:
         self._transports = []
         self._observability = None
         self._loggers = {}
+        self._matrix = None
 
     # ------------------------------------------------------------------
     # Public API
@@ -113,6 +119,7 @@ class SyntropyLog:
                 transports=self._transports,
                 masking=self._masking,
                 context_mgr=self._context,
+                matrix=self._matrix,
             )
         return self._loggers[name]
 
@@ -134,6 +141,20 @@ class SyntropyLog:
         self._config.logger.level = level
         for logger in self._loggers.values():
             logger._level = level
+
+    def reconfigure_logging_matrix(self, matrix: Dict[str, list]) -> None:
+        """
+        Replace the Logging Matrix at runtime — no restart needed.
+
+        Security boundary: only context-field visibility changes; masking,
+        levels and transports stay as set at init().
+
+            slpy.reconfigure_logging_matrix({'default': ['correlation_id'], 'error': ['*']})
+        """
+        self._require_initialized()
+        self._matrix = LoggingMatrix.create(matrix)
+        for logger in self._loggers.values():
+            logger._matrix = self._matrix
 
     def get_propagation_headers(self, target: Optional[str] = None) -> Dict[str, str]:
         """
