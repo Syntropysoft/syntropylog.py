@@ -4,15 +4,24 @@ All notable changes to slpy are documented here.
 
 ---
 
-## [0.4.1] — 2026-07-09
+## [1.0.0] — 2026-07-09
 
-Documentation only — no API or behavior changes.
+**First stable release.** 0.4.0 brought slpy to conceptual parity with its siblings —
+[SyntropyLog](https://www.npmjs.com/package/syntropylog) (Node.js, the reference implementation)
+and [sl4n](https://www.nuget.org/packages/sl4n/) (.NET); 1.0.0 declares that surface stable.
+From here the project adheres to semantic versioning: breaking changes only in major versions.
+
+No API or behavior changes since 0.4.0. (0.4.1 was version-bumped but never published;
+its docs-only change ships here.)
 
 ### Changed
 
+- Development status: Alpha → **Production/Stable** (PyPI classifiers).
 - README family links now point at the published packages only
   ([syntropylog on npm](https://www.npmjs.com/package/syntropylog),
   [sl4n on NuGet](https://www.nuget.org/packages/sl4n/)) — the criterion used across the family.
+- Project URLs fixed to the actual repository (`Syntropysoft/syntropylog.py`) — the previous
+  links pointed at a repo that does not exist.
 
 ---
 
