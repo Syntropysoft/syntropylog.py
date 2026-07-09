@@ -4,6 +4,18 @@ All notable changes to slpy are documented here.
 
 ---
 
+## [0.4.1] — 2026-07-09
+
+Documentation only — no API or behavior changes.
+
+### Changed
+
+- README family links now point at the published packages only
+  ([syntropylog on npm](https://www.npmjs.com/package/syntropylog),
+  [sl4n on NuGet](https://www.nuget.org/packages/sl4n/)) — the criterion used across the family.
+
+---
+
 ## [0.4.0] — 2026-07-09
 
 Parity release: slpy now covers the same conceptual surface as its siblings —

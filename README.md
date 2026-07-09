@@ -18,7 +18,7 @@
 </p>
 
 <p align="center">
-  slpy is the Python implementation of <a href="https://github.com/Syntropysoft/SyntropyLog"><strong>SyntropyLog</strong></a> — the reference implementation for Node.js (<a href="https://www.npmjs.com/package/syntropylog">npm</a>). The same declarative model exists for <strong>.NET</strong> as <a href="https://www.nuget.org/packages/sl4n/"><strong>sl4n</strong></a> (<a href="https://github.com/Syntropysoft/sl4n">repo</a>), built on <code>Microsoft.Extensions.Logging</code>. Same concepts everywhere — Logging Matrix, masking by field name, retention, durable delivery — each implemented idiomatically for its runtime.
+  slpy is the Python implementation of <a href="https://www.npmjs.com/package/syntropylog"><strong>SyntropyLog</strong></a> — the reference implementation for Node.js. The same declarative model exists for <strong>.NET</strong> as <a href="https://www.nuget.org/packages/sl4n/"><strong>sl4n</strong></a>, built on <code>Microsoft.Extensions.Logging</code>. Same concepts everywhere — Logging Matrix, masking by field name, retention, durable delivery — each implemented idiomatically for its runtime.
 </p>
 
 ---
@@ -517,7 +517,7 @@ It is the component that makes every log line correct, consistent, and safe befo
 
 - **[Data masking](docs/data_masking.md)** · **[Logging matrix](docs/logger_matrix.md)** · **[Lifecycle](docs/lifecycle.md)** · **[Architecture & design decisions](docs/slpy-refactor-plan.md)**
 - **Runnable examples** (`examples/01`–`09`): basic setup, named loggers + `child()`, context propagation, masking, `with_meta` + audit, FastAPI middleware, pretty console, adapter transport fanout, observability events.
-- **The family:** [SyntropyLog (Node.js)](https://github.com/Syntropysoft/SyntropyLog) — the reference implementation · [sl4n (.NET)](https://github.com/Syntropysoft/sl4n)
+- **The family:** [SyntropyLog (Node.js)](https://www.npmjs.com/package/syntropylog) — the reference implementation · [sl4n (.NET)](https://www.nuget.org/packages/sl4n/)
 
 ```bash
 git clone https://github.com/Syntropysoft/syntropylog.py

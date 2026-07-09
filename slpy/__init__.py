@@ -59,6 +59,6 @@ __all__ = [
     "Logger",
 ]
 
-__version__ = "0.4.0"
+__version__ = "0.4.1"
 __author__ = "Syntropysoft"
 __license__ = "Apache-2.0"
