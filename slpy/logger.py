@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from .masking import MaskingEngine
     from .context import ContextManager
     from .matrix import LoggingMatrix
+    from .retention import RetentionRegistry
     from .stats import SlpyStats
     from .transport import Transport
 
@@ -46,6 +47,7 @@ class Logger:
         matrix: Optional["LoggingMatrix"] = None,
         stats: Optional["SlpyStats"] = None,
         on_log_failure: Optional[Callable[[BaseException, "Transport"], None]] = None,
+        retention: Optional["RetentionRegistry"] = None,
     ) -> None:
         self._name = name
         self._level = level
@@ -56,6 +58,7 @@ class Logger:
         self._matrix = matrix
         self._stats = stats
         self._on_log_failure = on_log_failure
+        self._retention = retention
 
     # ------------------------------------------------------------------
     # Fluent API
@@ -73,6 +76,7 @@ class Logger:
             matrix=self._matrix,
             stats=self._stats,
             on_log_failure=self._on_log_failure,
+            retention=self._retention,
         )
 
     def with_meta(self, payload: Dict[str, Any]) -> "Logger":
@@ -86,6 +90,25 @@ class Logger:
         - Feature flags:  .with_meta({"experiment": "checkout-v2"})
         """
         return self.child(meta=payload)
+
+    def with_retention(self, name_or_policy: Any) -> "Logger":
+        """
+        Tag every log from this logger with a retention policy, so the
+        transport can route and expire it by compliance rules.
+
+            audit = logger.with_retention('SOX_AUDIT_TRAIL')   # registered name
+            audit = logger.with_retention({'days': 90, 'class': 'GDPR'})  # inline
+
+        The stamped fields (retention / retention_class / retention_days)
+        travel on every entry and are never filtered by the Logging Matrix
+        (they are bindings, not context). An unregistered name still stamps
+        `retention` — compliance intent is never silently dropped.
+        """
+        if self._retention is None:
+            stamp = {"retention": name_or_policy} if isinstance(name_or_policy, str) else {}
+        else:
+            stamp = self._retention.stamp(name_or_policy)
+        return self.child(**stamp)
 
     # ------------------------------------------------------------------
     # Log methods

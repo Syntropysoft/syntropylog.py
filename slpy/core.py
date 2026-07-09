@@ -13,6 +13,7 @@ from .logger import Logger
 from .masking import MaskingEngine, MaskingRule, MaskingStrategy
 from .matrix import LoggingMatrix
 from .observability import ConsoleObservabilityTransport, ObservabilityEngine, OutboundEvent
+from .retention import RetentionRegistry
 from .stats import SlpyStats, StatsSnapshot
 from .transport import ConsoleTransport, Transport
 
@@ -37,6 +38,7 @@ class SyntropyLog:
         self._loggers: Dict[str, Logger] = {}
         self._matrix: Optional[LoggingMatrix] = None
         self._stats: Optional[SlpyStats] = None
+        self._retention: Optional[RetentionRegistry] = None
 
     async def init(self, config: Optional[Dict[str, Any]] = None) -> None:
         """
@@ -64,6 +66,9 @@ class SyntropyLog:
 
         # Self-observability counters (slpy.get_stats())
         self._stats = SlpyStats()
+
+        # Retention policies — compliance metadata resolved by name
+        self._retention = RetentionRegistry.create(cfg.retention_policies)
 
         # Masking
         masking_cfg = cfg.masking
@@ -107,6 +112,7 @@ class SyntropyLog:
         self._loggers = {}
         self._matrix = None
         self._stats = None
+        self._retention = None
 
     # ------------------------------------------------------------------
     # Public API
@@ -130,6 +136,7 @@ class SyntropyLog:
                 matrix=self._matrix,
                 stats=self._stats,
                 on_log_failure=self._config.logger.on_log_failure,
+                retention=self._retention,
             )
         return self._loggers[name]
 

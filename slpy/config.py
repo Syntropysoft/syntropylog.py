@@ -51,6 +51,8 @@ class Config:
     observability: ObservabilityConfig = field(default_factory=ObservabilityConfig)
     # Per-level whitelist of context fields: {'default': [...], 'info': [...], 'error': ['*']}
     logging_matrix: Dict[str, List[str]] = field(default_factory=dict)
+    # Named retention policies: {'SOX_AUDIT_TRAIL': {'days': 2555, 'class': 'SOX'}}
+    retention_policies: Dict[str, Any] = field(default_factory=dict)
 
 
 class ConfigManager:
@@ -84,6 +86,7 @@ class ConfigManager:
                 enabled=obs_raw.get("enabled", True),
             ),
             logging_matrix=raw.get("logging_matrix", {}),
+            retention_policies=raw.get("retention_policies", {}),
         )
 
     def validate(self) -> None:
@@ -113,3 +116,7 @@ class ConfigManager:
     @property
     def logging_matrix(self) -> Dict[str, List[str]]:
         return self._config.logging_matrix
+
+    @property
+    def retention_policies(self) -> Dict[str, Any]:
+        return self._config.retention_policies
