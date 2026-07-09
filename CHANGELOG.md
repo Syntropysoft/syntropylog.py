@@ -49,6 +49,10 @@ SyntropyLog (Node.js) and sl4n (.NET).
   that preserves structure.
 - **Masking failure no longer returns the raw payload.** On failure the entry
   degrades to a safe payload (`_masking_failed: True` + core fields only).
+- **Bare `credit_card` / `ssn` / `phone` field names were not covered** by the
+  default rules (they required a `number`/`num`/`id` suffix, so `ssn='123-45-6789'`
+  leaked). The defaults now also match the anchored bare aliases — the same
+  coverage as sl4n's `MaskingPatterns`, plus the derived forms.
 - Native `add_rule` patterns are now case-insensitive, matching Python.
 - A shared parity fixture (`tests/test_masking_parity.py`) asserts both engines
   byte-identical — the regression lock against engine drift.

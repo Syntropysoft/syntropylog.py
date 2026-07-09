@@ -82,11 +82,14 @@ def mask_pattern(*keys: str) -> str:
     return f"^({'|'.join(keys)})$"
 
 
+# Loose suffix patterns catch derived names (creditCardNumber, ssn_number);
+# the anchored alternates catch the bare aliases (credit_card, ssn, phone) —
+# same coverage as sl4n's MaskingPatterns plus the derived forms.
 _DEFAULT_RULES: List[MaskingRule] = [
-    MaskingRule(r"(?:credit|card|cc|payment).*?(?:number|num|id)", MaskingStrategy.CREDIT_CARD),
-    MaskingRule(r"(?:ssn|social|security).*?(?:number|num)", MaskingStrategy.SSN),
+    MaskingRule(r"(?:credit|card|cc|payment).*?(?:number|num|id)|^(?:credit_?card|card_?number)$", MaskingStrategy.CREDIT_CARD),
+    MaskingRule(r"(?:ssn|social|security).*?(?:number|num)|^(?:ssn|social_?security)$", MaskingStrategy.SSN),
     MaskingRule(r"(?:email|mail|e-mail)", MaskingStrategy.EMAIL),
-    MaskingRule(r"(?:phone|tel|mobile|cell).*?(?:number|num)", MaskingStrategy.PHONE),
+    MaskingRule(r"(?:phone|tel|mobile|cell).*?(?:number|num)|^(?:phone|mobile|tel|cell)$", MaskingStrategy.PHONE),
     MaskingRule(r"(?:password|pass|pwd|secret)", MaskingStrategy.PASSWORD),
     MaskingRule(r"(?:token|key|auth|jwt|bearer)", MaskingStrategy.TOKEN),
 ]

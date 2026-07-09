@@ -21,14 +21,16 @@ use regex::Regex;
 // ---------------------------------------------------------------------------
 // Default patterns — compiled once at module load
 // ---------------------------------------------------------------------------
+// Kept in lockstep with slpy/masking.py _DEFAULT_RULES — loose suffix patterns
+// for derived names + anchored alternates for the bare aliases.
 static DEFAULT_RULES: Lazy<Vec<(Regex, Strategy)>> = Lazy::new(|| {
     vec![
-        (re(r"(?i)(?:credit|card|cc|payment).*?(?:number|num|id)"), Strategy::CreditCard),
-        (re(r"(?i)(?:ssn|social|security).*?(?:number|num)"),       Strategy::Ssn),
-        (re(r"(?i)(?:email|mail|e-mail)"),                           Strategy::Email),
-        (re(r"(?i)(?:phone|tel|mobile|cell).*?(?:number|num)"),      Strategy::Phone),
-        (re(r"(?i)(?:password|pass|pwd|secret)"),                    Strategy::Full),
-        (re(r"(?i)(?:token|key|auth|jwt|bearer)"),                   Strategy::Full),
+        (re(r"(?i)(?:credit|card|cc|payment).*?(?:number|num|id)|^(?i)(?:credit_?card|card_?number)$"), Strategy::CreditCard),
+        (re(r"(?i)(?:ssn|social|security).*?(?:number|num)|^(?i)(?:ssn|social_?security)$"),            Strategy::Ssn),
+        (re(r"(?i)(?:email|mail|e-mail)"),                                                               Strategy::Email),
+        (re(r"(?i)(?:phone|tel|mobile|cell).*?(?:number|num)|^(?i)(?:phone|mobile|tel|cell)$"),          Strategy::Phone),
+        (re(r"(?i)(?:password|pass|pwd|secret)"),                                                        Strategy::Full),
+        (re(r"(?i)(?:token|key|auth|jwt|bearer)"),                                                       Strategy::Full),
     ]
 });
 

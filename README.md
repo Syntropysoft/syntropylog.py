@@ -5,81 +5,35 @@
 <h1 align="center">slpy</h1>
 
 <p align="center">
-  <strong>The Declarative Observability Framework for Python.</strong>
+  <strong>The declarative observability framework for Python — the Python member of the SyntropyLog family.</strong>
   <br />
-  You declare what each log should carry. slpy handles the rest.
+  Correlation IDs, PII masking by field name, per-level field control and retention — declared <strong>once</strong> at <code>init()</code> and enforced on every log, with an optional <strong>Rust masking engine</strong> (transparent pure-Python fallback). <strong>Failsafe by design:</strong> logging can never crash your app — and audit entries can survive backend outages <strong>and process restarts</strong>.
 </p>
 
 <p align="center">
-  <a href="#"><img src="https://img.shields.io/badge/status-alpha-orange.svg" alt="Alpha"></a>
-  <a href="https://github.com/Syntropysoft/SyntropyLog/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg" alt="License"></a>
+  <a href="https://pypi.org/project/slpy-log/"><img src="https://img.shields.io/pypi/v/slpy-log.svg" alt="PyPI Version"></a>
+  <a href="https://github.com/Syntropysoft/syntropylog.py/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg" alt="License"></a>
   <a href="#"><img src="https://img.shields.io/badge/python-3.7+-blue.svg" alt="Python 3.7+"></a>
   <a href="#"><img src="https://img.shields.io/badge/dependencies-zero-brightgreen.svg" alt="Zero dependencies"></a>
 </p>
 
 <p align="center">
-  slpy is the Python member of the SyntropyLog family — same declarative model, three runtimes:
-  <a href="https://www.npmjs.com/package/syntropylog"><strong>SyntropyLog</strong></a> (Node.js) ·
-  <a href="https://www.nuget.org/packages/sl4n/"><strong>sl4n</strong></a> (.NET) ·
-  <strong>slpy</strong> (Python)
+  slpy is the Python implementation of <a href="https://github.com/Syntropysoft/SyntropyLog"><strong>SyntropyLog</strong></a> — the reference implementation for Node.js (<a href="https://www.npmjs.com/package/syntropylog">npm</a>). The same declarative model exists for <strong>.NET</strong> as <a href="https://www.nuget.org/packages/sl4n/"><strong>sl4n</strong></a> (<a href="https://github.com/Syntropysoft/sl4n">repo</a>), built on <code>Microsoft.Extensions.Logging</code>. Same concepts everywhere — Logging Matrix, masking by field name, retention, durable delivery — each implemented idiomatically for its runtime.
 </p>
 
 ---
 
 ## What's new in 0.4.0
 
-- **Logging Matrix** — a per-level whitelist of context fields, declared once. [Section ›](#logging-matrix)
-- **Retention policies** — named compliance policies (`with_retention('SOX_AUDIT_TRAIL')`) stamped on every tagged entry. [Section ›](#retention-policies)
+- **Logging Matrix** — a per-level whitelist of context fields, declared once. [Section ›](#logging-matrix--the-differentiator)
+- **Retention policies** — named compliance policies (`with_retention('SOX_AUDIT_TRAIL')`) stamped on every tagged entry. [Section ›](#compliance-routing--retention-as-data)
 - **DurableFileTransport** — audit delivery that survives backend outages AND process restarts, via a self-emptying disk spool. [Section ›](#durable-delivery--durablefiletransport)
-- **Masking hardened, in BOTH engines (Python + Rust)** — non-string values and nested objects under a sensitive key are now masked (`password=12345` and `password={'hash': ...}` no longer leak); lists are no longer corrupted by the masking pass; `MASK_KEYS` aliases + `mask_pattern()`; `on_masking_error` hook; on failure the entry degrades to a safe payload — raw metadata never leaks.
+- **Masking hardened, in BOTH engines (Python + Rust)** — non-string values and nested objects under a sensitive key are now masked (`password=12345` and `password={'hash': ...}` no longer leak); bare `credit_card`/`ssn`/`phone` field names are now covered; lists are no longer corrupted by the masking pass; `MASK_KEYS` aliases + `mask_pattern()`; `on_masking_error` hook; on failure the entry degrades to a safe payload — raw metadata never leaks.
 - **Safety boundary** — ANSI/control characters stripped from every string before transports (log-injection defense); `on_log_failure` hook; `slpy.get_stats()` health counters.
 - **Testing toolkit** — `slpy.testing.SpyTransport` for asserting on emitted (and masked) entries.
 - **Timestamps are now ISO-8601** with milliseconds and offset (was epoch-ms) — the same format as SyntropyLog and sl4n.
 
 Details: [CHANGELOG.md](CHANGELOG.md).
-
----
-
-## What is slpy?
-
-Every Python team writes the same boilerplate: thread `request_id` through every function signature, scrub `password` fields before logging, remember to call `logger.info()` instead of `print()`, repeat the same `extra={"service": "payment"}` on every call.
-
-slpy solves the boilerplate problem declaratively. You declare the rules once at startup. The framework applies them consistently on every log call, in every coroutine, across every service — without you thinking about it again.
-
-```python
-from slpy import slpy
-
-await slpy.init({
-    'logger': {'level': 'info'},
-    'masking': {'enable_default_rules': True},
-})
-
-logger = slpy.get_logger('payment-service')
-
-async with slpy.context(request_id='req-001', user_id='usr-42'):
-    logger.info('Card charged', amount=299.90, email='john@example.com')
-    # → {"level":"info","message":"Card charged","service":"payment-service",
-    #    "request_id":"req-001","user_id":"usr-42",
-    #    "amount":299.9,"email":"j******n@example.com"}
-```
-
-The `request_id` propagated automatically. The `email` was masked automatically. The `service` field appeared automatically. You wrote none of that explicitly.
-
----
-
-## The declarative shift
-
-| Instead of... | You declare... | slpy does automatically |
-|---------------|----------------|------------------------|
-| Threading `request_id` through every function | `async with slpy.context(request_id=id)` | Propagates to all logs in scope via `contextvars` |
-| Scrubbing sensitive fields before logging | `masking: {enable_default_rules: True}` | Masks email, password, token, credit card on every log |
-| Repeating `extra={"service": "payment"}` | `slpy.get_logger('payment-service')` | `service` field on every log from that logger |
-| Copying context into child functions | `logger.child(order_id='123')` | All bindings carried automatically on every subsequent call |
-| Filtering noisy context per level | `logging_matrix: {'info': [...], 'error': ['*']}` | Only whitelisted context fields reach a transport at each level |
-| Routing compliance logs manually | `logger.with_retention('SOX_AUDIT_TRAIL')` | `retention` / `retention_class` / `retention_days` stamped on every entry |
-| Writing a transport class per destination | `AdapterTransport(adapter=UniversalAdapter(executor=fn))` | Your executor receives the clean entry — connect to anything |
-| Manually building headers per destination | `context.targets: {kafka: {...}, s3: {...}}` | `get_propagation_headers("kafka")` returns the right key names |
-| Adding tracing calls before every outbound call | `observability: {transports: [...]}` | `OutboundEvent` emitted automatically on every `get_propagation_headers()` |
 
 ---
 
@@ -94,77 +48,96 @@ import asyncio
 from slpy import slpy
 
 async def main():
-    await slpy.init({
-        'logger': {'level': 'info'},
-        'masking': {'enable_default_rules': True},
-    })
+    # 1. Configure once — this is all you need.
+    await slpy.init({'logger': {'level': 'info'}, 'masking': {'enable_default_rules': True}})
 
-    logger = slpy.get_logger('my-service')
-    logger.info('Service started')
+    # 2. Log. Sensitive fields are masked automatically, before any transport.
+    logger = slpy.get_logger('payments')
+    async with slpy.context(request_id='req-001'):
+        logger.info('Card charged', email='john@example.com', password='hunter2', amount=299.90)
 
     await slpy.shutdown()
 
 asyncio.run(main())
 ```
 
-No transport configured → `ConsoleTransport` (structured JSON) is used automatically.
+What lands on the console (structured JSON — this is the real output):
 
----
-
-## Named loggers and child()
-
-Each component gets its own named logger. `child()` binds context once — every log from that instance carries it automatically. Bindings are immutable and composable.
-
-```python
-async def process_order(order_id: str, user_id: str) -> None:
-    # Bind once — no need to repeat on every call
-    logger = slpy.get_logger('order-service').child(
-        order_id=order_id,
-        user_id=user_id,
-    )
-
-    logger.info('Processing')                          # carries order_id, user_id
-    logger.info('Calculated', total=299.90, items=3)   # carries order_id, user_id
-
-    payment = logger.child(step='payment')             # adds step, keeps the rest
-    payment.info('Charging card')                      # carries order_id, user_id, step
-    payment.info('Approved', amount=299.90)
+```json
+{"level":"info","message":"Card charged","timestamp":"2026-07-09T15:14:14.929+00:00","service":"payments","request_id":"req-001","email":"j**n@example.com","password":"*******","amount":299.9}
 ```
 
-`child()` never mutates the parent. Each call returns a new logger with merged bindings.
+The `request_id` propagated automatically. The `email` and `password` were masked automatically. The `service` field appeared automatically. You wrote none of that explicitly — and this is the **default behavior**, not magic. From here everything is configurable: masking rules, which context fields each level emits, where logs go, retention. The sections below are how.
+
+> **Masking is by field name.** A field whose *key* matches a rule is masked; text you put in the message itself passes through untouched. So pass sensitive data as **keyword fields** — `logger.info('msg', email=email)` — not interpolated into the message string. **Log-data quality is the caller's responsibility:** masking enforces your rules on keyed fields — it can't find PII you hide in prose.
 
 ---
 
-## Context propagation
+## What slpy is
 
-slpy uses Python's native `contextvars` — the same mechanism as `AsyncLocalStorage` in Node.js. Context propagates correctly across `asyncio.gather()`, `asyncio.create_task()`, and thread-pool executors.
+> **Not a logger — an observability pipeline.** With `logging`, `structlog` or `loguru` you wire correlation IDs, PII redaction, and per-level field control yourself, in every service. slpy does it for you: declare it **once** in `init()`, and it runs on every log call, in every coroutine, across every service — before the entry ever reaches the **console, your database, Elasticsearch, Datadog, or wherever your `executor` sends it.**
 
-```python
-async def handle_request(request_id: str, user_id: str) -> None:
-    async with slpy.context(request_id=request_id, user_id=user_id):
-        logger.info('Request received')            # request_id, user_id here
-        await fetch_from_db()                      # request_id, user_id here too
-        logger.info('Request complete')
+Every Python team building services ends up writing the same boilerplate: thread `request_id` through every function signature, scrub `password` before logging, remember `extra={"service": ...}` on every call, repeat the same middleware in every service.
 
-async def fetch_from_db() -> None:
-    # No function argument needed — context is already here
-    logger.debug('Running query')                  # request_id, user_id propagated
-```
+slpy solves that **declaratively**. You declare the rules once at startup; the framework applies them consistently on every log call, in every coroutine, across every service.
 
-Concurrent requests are fully isolated. Each `async with slpy.context(...)` opens its own scope; inner scopes do not leak into outer ones.
+It is scoped on purpose: slpy owns the **log pipeline up to the moment of persistence** — matrix filtering, context propagation, masking, sanitization, retention metadata. **It does not manage any backend** (no database, HTTP or broker clients in the core). Where the entry goes is a one-function `executor` you write. That keeps the framework independent of client-library versions and storage churn.
+
+Four pillars:
+
+- **Logging Matrix** — a declarative whitelist of context fields per log level. If a field isn't in the matrix for that level, it never reaches a transport. Field control by config, not by code review.
+- **Retention-aware audit trail with delivery guarantees** — `with_retention(...)` travels with each entry so your transport routes it by policy. `DurableFileTransport` adds a self-emptying disk spool so audit entries survive backend outages and process restarts.
+- **Universal Adapter** — one `executor` function sends logs to Postgres, Mongo, Elasticsearch, S3, anything. You write the executor; the framework stays agnostic of client libraries.
+- **Silent Observer pipeline** — masking with a safe-payload fallback, ANSI/control-char sanitization, per-transport failure isolation. Logging cannot crash your app; failures surface through hooks and counters (`get_stats()`).
+
+An optional Rust engine (`slpy-native`) accelerates masking when installed, with a transparent pure-Python fallback when not — **same rules, same output, locked by a shared parity test**.
 
 ---
 
-## Logging Matrix
+## How it compares to logging, structlog & loguru
+
+`logging`, `structlog` and `loguru` are loggers. slpy is a different category — an **observability pipeline** that does *in the framework* what a logger leaves to you:
+
+| | logging / structlog / loguru | slpy |
+|---|---|---|
+| **Category** | logger | observability pipeline (matrix → masking → sanitization → routing) |
+| **PII masking** | bring your own processors | built in, by field name, at any depth — optional **Rust engine** |
+| **Correlation IDs** | you thread them, per service | automatic via `contextvars`, declared once |
+| **Per-level field control** | manual | declarative **Logging Matrix** |
+| **Retention / audit routing** | DIY | first-class — `with_retention` + a restart-surviving durable transport |
+| **If logging throws** | can bubble into your code | **Silent Observer** — logging never throws, can't crash your app |
+
+**On speed — honestly:** the only apples-to-apples comparison is *minimal logging* (no masking), and there slpy is competitive — see the measured numbers in [Performance](#performance). With masking fully active slpy still beats stdlib `logging` without masking, but structlog/loguru numbers are a no-masking reference, not a race: they don't mask, correlate or filter.
+
+---
+
+## The declarative shift
+
+With a logger, you **write logging**. With slpy, you **declare observability**.
+
+| Instead of… | You declare… | slpy does automatically |
+|---|---|---|
+| Threading `request_id` through every function | `async with slpy.context(request_id=id)` | Propagates to all logs in scope via `contextvars` |
+| Scrubbing sensitive fields before logging | `masking: {'enable_default_rules': True}` | Masks email, password, token, card, SSN, phone on every log |
+| Repeating `extra={"service": "payments"}` | `slpy.get_logger('payments')` | `service` on every log from that logger |
+| Copying context into child functions | `logger.child(order_id='123')` | Bindings carried on every subsequent call |
+| Filtering noisy context per level | `logging_matrix: {'info': [...], 'error': ['*']}` | Only whitelisted context fields reach a transport at each level |
+| Routing compliance logs manually | `logger.with_retention('SOX_AUDIT_TRAIL')` | `retention` / `retention_class` / `retention_days` stamped on every entry |
+| Writing a transport class per destination | `AdapterTransport` + `UniversalAdapter` | Your `executor` receives the clean entry — connect to anything |
+| Building headers per downstream target | `context.outbound: {'kafka': {...}}` | `get_propagation_headers('kafka')` returns the right wire names |
+
+---
+
+## Logging Matrix — the differentiator
 
 A declarative whitelist deciding **which context fields appear at each log level**. A context field not whitelisted for a level never reaches a transport. Compliance reviews the matrix, not your codebase.
 
 ```python
 await slpy.init({
     'logging_matrix': {
-        'default': ['request_id'],                       # any level not listed
+        'default': ['request_id'],                        # any level not listed
         'info':    ['request_id', 'user_id', 'operation'],
-        'error':   ['*'],                                # '*' = every context field
+        'error':   ['*'],                                 # '*' = every context field
     },
 })
 
@@ -177,7 +150,7 @@ async with slpy.context(request_id='req-7', user_id='u-1', tenant_id='acme'):
 
 **The matrix governs context, not per-call data.** Core fields (`level`, `message`, `service`, `timestamp`), `child()` bindings and per-call kwargs are always emitted (and masked) — if you don't want a per-call field logged, don't pass it. The matrix exists for the auto-propagating context you *can't* trim at each call site.
 
-Semantics (identical across the family):
+The exact rules (identical across SyntropyLog, sl4n and slpy):
 
 1. No `logging_matrix` configured → every context field passes (nothing changes).
 2. Level listed → only those fields pass.
@@ -185,7 +158,7 @@ Semantics (identical across the family):
 4. Neither the level nor `default` exist → **all context is dropped** for that level. Strict whitelist — always define `default`.
 5. A list containing `'*'` → every context field passes at that level.
 
-Change it at runtime — only field visibility changes; masking, levels and transports stay as set at `init()`:
+Change it at runtime — no restart. Security boundary: only context-field visibility changes; masking, levels and transports stay as set at `init()`:
 
 ```python
 slpy.reconfigure_logging_matrix({'default': ['request_id'], 'error': ['*']})
@@ -193,108 +166,135 @@ slpy.reconfigure_logging_matrix({'default': ['request_id'], 'error': ['*']})
 
 ---
 
+## Named loggers and the fluent API
+
+Each component gets its own named logger. `child()` binds context once — every log from that instance carries it automatically. Bindings are immutable and composable; `child()` never mutates the parent.
+
+```python
+logger = slpy.get_logger('order-service').child(order_id=order_id, user_id=user_id)
+
+logger.info('Processing')                          # carries order_id, user_id
+logger.info('Calculated', total=299.90, items=3)   # carries order_id, user_id
+
+payment = logger.child(step='payment')             # adds step, keeps the rest
+payment.info('Charging card')
+```
+
+| Builder | Binds to every log | Notes |
+|---|---|---|
+| `get_logger('name')` | `service: 'name'` | cached singleton per name |
+| `child(**fields)` | the given fields | immutable, composable |
+| `with_meta(payload)` | `meta: {...}` | free-form structured metadata |
+| `with_retention(name \| dict)` | `retention` fields | registry lookup by name, or inline `{'days','class'}` |
+
+`audit(...)` always emits, regardless of the configured level — use it for compliance events:
+
+```python
+await slpy.init({'logger': {'level': 'error'}})
+logger.info('hidden')    # not emitted
+logger.audit('visible')  # always emitted
+```
+
+---
+
+## Context propagation
+
+slpy uses Python's native `contextvars` — the same mechanism as `AsyncLocalStorage` in Node.js. Context propagates correctly across `asyncio.gather()`, `asyncio.create_task()`, and thread-pool executors. Concurrent requests are fully isolated.
+
+```python
+async def handle_request(request_id: str, user_id: str) -> None:
+    async with slpy.context(request_id=request_id, user_id=user_id):
+        logger.info('Request received')            # request_id, user_id here
+        await fetch_from_db()                      # ...and here, no arguments threaded
+
+async def fetch_from_db() -> None:
+    logger.debug('Running query')                  # request_id, user_id propagated
+```
+
+### FastAPI / ASGI middleware
+
+One line wires automatic context extraction into every request (`pip install slpy-log[fastapi]`). Declare which inbound headers map to which conceptual fields, per source, and which wire names each outbound target uses:
+
+```python
+'context': {
+    'inbound':  {'http': {'request_id': 'X-Request-ID'}},
+    'outbound': {
+        'http':  {'request_id': 'X-Request-ID'},      # default target
+        'kafka': {'request_id': 'requestId'},
+    },
+}
+```
+
+### Propagation headers
+
+`get_propagation_headers(target)` returns the current context translated to the wire names of that target — HTTP headers, Kafka headers, S3 metadata, anything:
+
+```python
+await httpx.get(url, headers=slpy.get_propagation_headers())        # http names
+await kafka.send(topic, headers=slpy.get_propagation_headers('kafka'))
+```
+
+Every call also emits an `OutboundEvent` on a separate observability channel (never masked, own transports) — a traceability record of what context left the service, to which target, and when. Route it to Jaeger, Datadog, or disable with `'observability': {'enabled': False}`.
+
+---
+
 ## Data masking
 
-Masking runs automatically on every log entry, before any transport. Rules match **field names** at any depth; once a key matches, everything beneath it is masked — nested dicts, lists, and non-string scalars included.
+Masking runs automatically on every entry before it reaches any transport — **identically in the Rust engine and the Python fallback** (one rule set, asserted equal by a shared parity test). Rules match **field names** at any depth; once a key matches, everything beneath it is masked — nested dicts, lists, and non-string scalars included.
 
-> **Masking is by field name, never free text.** It masks the value of fields whose *key* matches a rule; it does **not** scan message text or string contents for PII. Put sensitive data in keyed fields — log-data quality is the caller's responsibility.
+> **Masking matches the field _name_, not the content.** It masks the value of fields whose key matches a rule; it does **not** scan free-text strings or the log message for PII. Put sensitive data in keyed fields — **log-data quality is the caller's responsibility.**
 
 ```python
 await slpy.init({
     'masking': {
-        'enable_default_rules': True,   # email, password, token, credit card, SSN, phone
+        'enable_default_rules': True,   # email, password, token, card, SSN, phone
         'rules': [
-            # Add your own — patterns compiled once at init()
-            {'pattern': r'internal_code', 'strategy': 'token'},
+            {'pattern': r'internal_code', 'strategy': 'token'},   # your own, on top
         ],
     },
 })
 
-logger.info('Payment', credit_card_number='4111-1111-1111-1234', amount=299.90)
-# → credit_card_number: "************1234"   amount: 299.9 (not masked)
-
-logger.info('User', email='john@example.com', name='John Doe')
-# → email: "j******n@example.com"   name: "John Doe" (not masked)
+logger.info('Payment', card_number='4111-1111-1111-1234', amount=299.90)
+# → card_number: "************1234"   amount: 299.9 (numbers untouched)
 
 logger.info('Order', order={'user': {'token': 'abc123', 'id': 'USR-1'}})
-# → order.user.token: "******"   order.user.id: "USR-1" (not masked)
+# → order.user.token: "******"   order.user.id: "USR-1" (not a sensitive key)
 
 # Non-strings and nested structures under a sensitive key are masked too:
 logger.info('Login', password=12345)             # → password: "*****"
 logger.info('Auth', password={'hash': 'abc'})    # → password.hash: "***"
 ```
 
-**One rule set, two engines, identical output.** If the optional Rust addon (`slpy-native`) is installed, masking runs in Rust; otherwise in pure Python. Both engines share the same semantics, locked by a byte-for-byte parity test fixture — the same discipline the Node.js sibling adopted after a native/JS divergence leaked PII (its KNOWN-ISSUES #2).
+**Identifiers keep their last digits (debuggable); credentials are fully redacted.** Real outputs from the default rules:
 
-Build custom rules from the grouped key aliases instead of string literals (keeps patterns out of secret scanners):
+| Field key (examples) | Result |
+|---|---|
+| `email`, `mail` | `j**n@example.com` |
+| `password`, `pass`, `pwd`, `secret` | `*******` (full mask) |
+| `token`, `key`, `auth`, `jwt`, `bearer`, `api_key` | `******` (full mask) |
+| `credit_card`, `card_number`, `creditCardNumber` | `************1234` |
+| `ssn`, `social_security`, `ssn_number` | `*****6789` |
+| `phone`, `mobile`, `tel`, `phone_number` | `*******4567` |
+
+The default rules are deliberately **greedy** — a field name that *contains* a sensitive word is masked (`user_password`, `sessionKey`). Better to over-mask than to leak. For precise custom rules, build anchored patterns from the grouped aliases (no string literals — keeps secret scanners like Sonar quiet):
 
 ```python
 from slpy import MASK_KEYS, mask_pattern
 
 'masking': {
     'rules': [
-        {'pattern': mask_pattern(*MASK_KEYS['token']), 'strategy': 'token'},
+        {'pattern': mask_pattern(*MASK_KEYS['token']), 'strategy': 'token'},   # ^(token|key|auth|jwt|bearer)$
     ],
 }
 ```
 
-**Failsafe.** Masking never throws. If it fails, the failure is counted (`slpy.get_stats().masking_failures`), reported through the optional `masking.on_masking_error` hook, and the entry degrades to a safe payload (`level`/`timestamp`/`message`/`service` + `_masking_failed: True`) — the raw metadata never leaks. Rules only ever run against field names (capped at 256 chars), never values, which bounds regex evaluation by construction.
-
-**Default rules**
-
-| Field pattern | Strategy | Example result |
-|---------------|----------|----------------|
-| `email`, `mail` | Email | `j******n@example.com` |
-| `password`, `pass`, `pwd`, `secret` | Full mask | `************` |
-| `token`, `key`, `auth`, `jwt`, `bearer` | Full mask | `**********` |
-| `credit_card`, `card_number` | Last 4 | `************1234` |
-| `ssn`, `social_security` | Last 4 | `*****6789` |
-| `phone`, `mobile`, `tel` | Last 4 | `*******4567` |
+**Failsafe.** Masking never throws. If it fails, the failure is counted (`get_stats().masking_failures`), reported through the optional `masking.on_masking_error` hook (which never receives the raw payload), and the entry degrades to a safe payload — `level`/`timestamp`/`message`/`service` plus `_masking_failed: True`. **The raw metadata never leaks.** Rules only ever run against field names (capped at 256 chars), never values — bounded input, bounded regex evaluation.
 
 ---
 
-## Audit level and with_meta()
+## Compliance routing — retention as data
 
-`audit` bypasses the configured level filter — it is always emitted. Use it for compliance events that must always be recorded regardless of the runtime log level.
-
-`with_meta(payload)` attaches arbitrary structured metadata to every log from that logger instance. The payload travels sanitized to all transports as `logEntry['meta']`.
-
-```python
-audit_logger = (
-    slpy.get_logger('compliance')
-    .with_meta({
-        'ttl_days': 730,
-        'regulation': 'GDPR',
-        'data_class': 'PII',
-        'destination': 'audit-store',
-    })
-    .child(user_id='USR-42')
-)
-
-audit_logger.audit('Data exported', records=1500)
-# → level: "audit"  meta: {ttl_days: 730, regulation: "GDPR", ...}
-#   user_id: "USR-42"  records: 1500
-
-# audit always appears — even when level is 'error'
-await slpy.init({'logger': {'level': 'error'}})
-logger.info('hidden')    # not emitted
-logger.audit('visible')  # always emitted
-```
-
-**with_meta() use cases**
-
-| Use case | Payload |
-|----------|---------|
-| Log retention routing | `{"ttl_days": 730, "destination": "cold-storage"}` |
-| Compliance tagging | `{"regulation": "GDPR", "data_class": "PII"}` |
-| Experiment tracking | `{"experiment": "checkout-v2", "variant": "B"}` |
-| Release context | `{"version": "1.4.0", "deploy_id": "d-001"}` |
-
----
-
-## Retention policies
-
-Compliance metadata as data: declare named policies once, tag loggers with `with_retention(name)`, and every tagged entry carries the policy — so your transport can route and expire it by rule. slpy attaches the metadata; storage and expiry are the transport's job.
+Declare named policies once; tag loggers with `with_retention(name)`; every tagged entry carries the policy so your transport routes and expires it by rule. slpy attaches the metadata — storage and expiry are the transport's job.
 
 ```python
 await slpy.init({
@@ -307,7 +307,6 @@ await slpy.init({
 audit = slpy.get_logger('payments').with_retention('SOX_AUDIT_TRAIL')
 audit.audit('Manager override', user_id='u-1')
 # → retention: "SOX_AUDIT_TRAIL"  retention_class: "SOX"  retention_days: 2555
-#   level: "audit"  user_id: "u-1"
 ```
 
 - The stamped fields are **never filtered by the Logging Matrix** — they are bindings, not context.
@@ -319,357 +318,43 @@ Pair it with `DurableFileTransport` (below) so tagged entries are also *delivere
 
 ---
 
-## FastAPI / ASGI middleware
-
-One line wires automatic context propagation into every request.
-
-```bash
-pip install slpy-log[fastapi]
-```
-
-```python
-from fastapi import FastAPI
-from slpy import slpy
-from slpy.fastapi import SyntropyMiddleware
-
-# Define your field, source, and target constants once
-FIELD_CORRELATION = 'correlation_id'
-SOURCE_FRONTEND   = 'frontend'
-TARGET_HTTP       = 'http'
-
-await slpy.init({
-    'context': {
-        'inbound':  {SOURCE_FRONTEND: {FIELD_CORRELATION: 'X-Correlation-ID'}},
-        'outbound': {TARGET_HTTP:     {FIELD_CORRELATION: 'X-Correlation-ID'}},
-    },
-})
-
-app = FastAPI()
-app.add_middleware(SyntropyMiddleware, source=SOURCE_FRONTEND)
-```
-
-Every log emitted during a request automatically carries `correlation_id`, `method`, and `path` — extracted from the incoming header or generated if absent. The correlation header is forwarded in the response using the outbound wire name.
-
-```python
-@app.get('/orders/{order_id}')
-async def get_order(order_id: str):
-    logger.info('Fetching', order_id=order_id)
-    # → {"level":"info","message":"Fetching","service":"api",
-    #    "correlation_id":"req-abc","method":"GET","path":"/orders/123",
-    #    "order_id":"123"}
-```
-
-`SyntropyMiddleware` is pure ASGI — it works with FastAPI, Starlette, Litestar, and any ASGI server (uvicorn, hypercorn) without framework-specific dependencies.
-
----
-
-## Propagation headers
-
-### Conceptual field names
-
-`correlation_id`, `trace_id`, `session_id`, `transaction_id` are **conceptual names internal to the framework**. They are not the names that travel on the wire — they are the keys slpy uses to identify each field inside the active context.
-
-The actual name that travels — the HTTP header, the Kafka key, the S3 metadata key — is declared by you in the configuration. The framework uses the conceptual names internally to read and write context, and translates them to the correct wire name for each destination at the moment of sending.
-
-```
-inbound['frontend']  internal context   outbound['http']      outbound['kafka']
-──────────────────   ────────────────   ─────────────────     ─────────────────
-X-Correlation-ID  -> correlation_id ->  X-Correlation-ID  /   correlationId
-X-Trace-ID        -> trace_id       ->  X-Trace-ID        /   traceId
-
-inbound['partner']   internal context   outbound['http']      outbound['kafka']
-──────────────────   ────────────────   ─────────────────     ─────────────────
-x-request-id      -> correlation_id ->  X-Correlation-ID  /   correlationId
-x-b3-traceid      -> trace_id       ->  X-Trace-ID        /   traceId
-```
-
-`inbound` and `outbound` are symmetric: `{name: {field: wire_name}}`. Each inbound source can use different wire names — the internal context and outbound side are identical regardless of which source the request came in from.
-
-This applies in both directions:
-
-- **Inbound** — `SyntropyMiddleware` reads incoming request headers using the wire names (`X-Correlation-ID`) and stores them in context under the conceptual name (`correlation_id`).
-- **Outbound** — `get_propagation_headers()` reads context by conceptual name and returns the dict translated to the wire names for the requested destination.
-
-Application code never sees wire names. It only works with conceptual names.
-
----
-
-### Configuration
-
-No built-in defaults. You declare exactly the fields your service needs — nothing more, nothing less.
-
-The recommended pattern is to define your own constants in one place and use them as keys everywhere — config, sources, targets, and accessors. This way a typo is caught by the IDE instead of failing silently at runtime. The `FIELD_` and `SOURCE_` prefixes in the examples below are naming conventions — they are not part of slpy.
-
-```python
-# fields.py — one place, all your field, source, and target definitions
-FIELD_CORRELATION = 'correlation_id'
-FIELD_TRACE       = 'trace_id'
-FIELD_TENANT      = 'tenant_id'
-
-SOURCE_FRONTEND = 'frontend'
-SOURCE_PARTNER  = 'partner'
-SOURCE_LEGACY   = 'legacy'
-
-TARGET_HTTP  = 'http'    # default — used by get_propagation_headers() with no arg
-TARGET_KAFKA = 'kafka'
-TARGET_S3    = 's3'
-TARGET_AZURE = 'azure'
-```
-
-`inbound` and `outbound` have the same shape: `{name: {field: wire_name}}`. One is keyed by source, the other by destination. The internal context is the translation layer between them.
-
-```python
-from myapp.fields import (
-    FIELD_CORRELATION, FIELD_TRACE, FIELD_TENANT,
-    SOURCE_FRONTEND, SOURCE_PARTNER, SOURCE_LEGACY,
-    TARGET_HTTP, TARGET_KAFKA, TARGET_S3, TARGET_AZURE,
-)
-
-await slpy.init({
-    'context': {
-        'inbound': {
-            SOURCE_FRONTEND: {FIELD_CORRELATION: 'X-Correlation-ID', FIELD_TRACE: 'X-Trace-ID'},
-            SOURCE_PARTNER:  {FIELD_CORRELATION: 'x-request-id',     FIELD_TRACE: 'x-b3-traceid'},
-            SOURCE_LEGACY:   {FIELD_CORRELATION: 'correlationid'},
-        },
-        'outbound': {
-            TARGET_HTTP:  {FIELD_CORRELATION: 'X-Correlation-ID', FIELD_TRACE: 'X-Trace-ID'},
-            TARGET_KAFKA: {FIELD_CORRELATION: 'correlationId',    FIELD_TRACE: 'traceId'},
-            TARGET_S3:    {FIELD_CORRELATION: 'Correlation_ID'},
-            TARGET_AZURE: {FIELD_CORRELATION: 'CorrelationID',    FIELD_TRACE: 'TraceID'},
-        },
-    },
-})
-
-# Each middleware instance reads from its declared source
-app.add_middleware(SyntropyMiddleware, source=SOURCE_FRONTEND)
-```
-
-The `source` parameter tells the middleware which inbound mapping to use. A BFF receiving traffic from multiple origins can declare each source separately — each with different wire names mapping to the same conceptual fields. Outbound is identical regardless of source.
-
-### Usage
-
-```python
-async with slpy.context(correlation_id='req-001', trace_id='trace-xyz'):
-
-    # No arg — uses TARGET_HTTP ('http') by default
-    await httpx.get(url, headers=slpy.get_propagation_headers())
-    # -> {'X-Correlation-ID': 'req-001', 'X-Trace-ID': 'trace-xyz'}
-
-    await kafka.send(topic, headers=slpy.get_propagation_headers(TARGET_KAFKA))
-    # -> {'correlationId': 'req-001', 'traceId': 'trace-xyz'}
-
-    await s3.put_object(Metadata=slpy.get_propagation_headers(TARGET_S3))
-    # -> {'Correlation_ID': 'req-001'}
-
-    await bus.send(msg, properties=slpy.get_propagation_headers(TARGET_AZURE))
-    # -> {'CorrelationID': 'req-001', 'TraceID': 'trace-xyz'}
-```
-
-Only fields that have a value in the active context appear in the result.
-
-**Context accessors**
-
-`slpy.get(key)` reads any field from the active context by its conceptual name.
-
-```python
-from myapp.fields import FIELD_CORRELATION, FIELD_TRACE, FIELD_TENANT
-
-slpy.get(FIELD_CORRELATION)                          # -> 'req-001'
-slpy.get(FIELD_TRACE)                                # -> 'trace-xyz'
-slpy.get(FIELD_TENANT)                               # -> 'acme'
-
-slpy.get_propagation_header_name(FIELD_CORRELATION)  # -> 'X-Correlation-ID'
-slpy.get_propagation_header_name(FIELD_TENANT)       # -> 'X-Tenant-ID'
-```
-
----
-
-## Observability layer
-
-Every `get_propagation_headers()` call automatically emits an `OutboundEvent` — a trazability record of what context left the service, to which target, and when. **These are not logs.** They are a separate observability channel, never masked, routed to a dedicated set of transports.
-
-```python
-from slpy import slpy, ObservabilityTransport, OutboundEvent
-
-class DatadogAPMTransport(ObservabilityTransport):
-    def emit(self, event: OutboundEvent) -> None:
-        datadog.trace(
-            name='outbound',
-            resource=event.target,
-            span_id=event.trace_id,
-            meta=event.headers,
-        )
-
-await slpy.init({
-    'observability': {
-        'transports': [DatadogAPMTransport()],  # Jaeger, Zipkin, custom — anything
-    },
-})
-```
-
-`OutboundEvent` fields:
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `target` | `str` | `"http"`, `"kafka"`, `"s3"`, `"azure"`, etc. |
-| `headers` | `dict` | Key/value pairs as they will be sent |
-| `correlation_id` | `str \| None` | From current context |
-| `trace_id` | `str \| None` | From current context |
-| `timestamp` | `int` | Epoch milliseconds |
-
-```python
-event.to_dict()
-# → {
-#     "event":          "outbound",
-#     "target":         "kafka",
-#     "headers":        {"correlationId": "req-001"},
-#     "correlation_id": "req-001",
-#     "trace_id":       "trace-xyz",
-#     "timestamp":      1714000000000
-#   }
-```
-
-**Fanout** — route to multiple backends simultaneously:
-
-```python
-'observability': {
-    'transports': [JaegerTransport(), ZipkinTransport(), CustomStoreTransport()],
-}
-```
-
-**Silent observer** — a broken transport never affects the application. The error is swallowed internally.
-
-**Disable entirely:**
-
-```python
-'observability': {'enabled': False}  # zero overhead, zero events
-```
-
----
-
-## Runtime level change
-
-```python
-sl.set_level('debug')   # all existing loggers update immediately
-sl.set_level('error')   # back to quiet
-```
-
----
-
 ## Transports
 
 | Transport | Output | Use case |
-|-----------|--------|----------|
+|---|---|---|
 | `ConsoleTransport` | Structured JSON | Production, CI, log collectors — **default** |
-| `PrettyConsoleTransport` | Colored human-readable | Local development |
-| `AdapterTransport` | Any destination | Databases, HTTP APIs, queues, multiple targets |
+| `PrettyConsoleTransport` | Colored human-readable | Local development (auto-falls back to JSON when stdout is not a TTY) |
+| `AdapterTransport` | Any destination | Databases, HTTP APIs, queues, fanout |
 | `DurableFileTransport` | Wraps any of the above | Audit logs that must survive outages and restarts |
 
 ### AdapterTransport + UniversalAdapter
 
-The most powerful routing primitive. You provide an `executor` function — sync or async — that receives the clean, already-masked log entry and sends it anywhere. slpy handles context propagation, masking, level filtering, error isolation, and fanout.
+You provide one `executor` function — sync or async — that receives the clean, already-masked entry and sends it anywhere. slpy handles context, masking, level filtering, and error isolation.
 
 ```python
 from slpy import slpy, AdapterTransport, UniversalAdapter, ConsoleTransport
 
 async def my_executor(data: dict) -> None:
-    # One function. Any number of destinations. Fully async.
     await asyncio.gather(
         prisma.system_log.create(data=data),
-        mongo_collection.insert_one(data),
         es.index(index='logs', body=data),
     )
 
 db_transport = AdapterTransport(
     name='db',
     adapter=UniversalAdapter(executor=my_executor),
+    # Optional formatter — adapt the entry to your schema:
     formatter=lambda e: {**e, 'timestamp': datetime.fromisoformat(e['timestamp'])},
 )
 
-await slpy.init({
-    'logger': {
-        'transports': [
-            db_transport,       # → Postgres + MongoDB + Elasticsearch
-            ConsoleTransport(), # → stdout
-        ],
-    },
-    'masking': {'enable_default_rules': True},
-})
+await slpy.init({'logger': {'transports': [db_transport, ConsoleTransport()]}})
 ```
 
-When `my_executor` is called, the entry is already:
-- **Masked** — `email`, `password`, `token`, credit card fields scrubbed
-- **Context-enriched** — `request_id`, `user_id`, any `slpy.context()` fields attached
-- **Formatted** — optionally transformed by your `formatter` to match your DB schema
-
-The executor is the only thing you write. Connect to Postgres, MongoDB, Elasticsearch, Datadog, OpenTelemetry, Kafka, a REST API, or all of them at once — slpy does not know or care.
-
-**`formatter`** (optional) — transform the entry before it reaches the executor. Use it to map field names, convert types, or add schema-specific fields:
-
-```python
-def db_formatter(entry: dict) -> dict:
-    return {
-        **entry,
-        'timestamp': datetime.fromisoformat(entry['timestamp']),
-        'env': os.getenv('APP_ENV', 'production'),
-    }
-```
-
-### PrettyConsoleTransport
-
-Human-readable colored output. Zero external dependencies — pure ANSI codes.
-
-```python
-from slpy import slpy, PrettyConsoleTransport
-
-await slpy.init({
-    'logger': {
-        'level': 'debug',
-        'transports': [PrettyConsoleTransport()],
-    },
-})
-```
-
-```
-12:00:00.123  DEBUG  payment-service     Starting up          version=0.1.0
-12:00:00.124  INFO   payment-service     Service ready        port=8080
-12:00:00.124  WARN   payment-service     High memory usage    heap_mb=420
-12:00:00.124  ERROR  payment-service     Connection refused   host=db.internal
-12:00:00.124  INFO   payment-service     User login           email=j**n@example.com
-12:00:00.124  AUDIT  payment-service     Data exported        meta={"regulation":"GDPR"}
-```
-
-**Auto-detects TTY** — when stdout is not a terminal (CI, pipes, production), falls back to JSON
-automatically. No code change needed between environments.
-
-Masking remains active in pretty output — sensitive fields are masked regardless of transport.
-
-```python
-PrettyConsoleTransport()            # auto-detect TTY (recommended)
-PrettyConsoleTransport(colors=True) # force colors on
-PrettyConsoleTransport(colors=False)# force JSON (same as ConsoleTransport)
-```
-
-### Custom transports
-
-For full control, extend `Transport` and implement `log(entry)`:
-
-```python
-from slpy.transport import Transport
-
-class ElasticsearchTransport(Transport):
-    def log(self, entry: dict) -> None:
-        self._es_client.index(index='logs', body=entry)
-```
-
-For most cases, `AdapterTransport` + `UniversalAdapter` is simpler — no subclassing needed.
-
-Multiple transports are supported — entries are sent to all of them.
+For full control, extend `Transport` and implement `log(entry)`. Multiple transports are supported — entries are sent to all of them, each isolated from the others' failures.
 
 ### Durable delivery — DurableFileTransport
 
-Fire-and-forget is the right default for `info`/`warn` — and exactly wrong for audit entries a compliance auditor will ask for. `DurableFileTransport` wraps any transport with a durability **buffer** (not an archive):
+Fire-and-forget is the right default for `info`/`warn` — and exactly wrong for audit entries an auditor will ask for. `DurableFileTransport` wraps any transport with a durability **buffer** (not an archive).
 
 **When does it write to disk?** Only during an outage — these are the exact conditions:
 
@@ -698,18 +383,41 @@ slpy.get_logger('payments').with_retention('SOX_AUDIT_TRAIL').audit(
 )
 ```
 
-Same design as sl4n's `DurableFileTransport` and the spirit of SyntropyLog's `DurableAdapterTransport` + `persistPath`.
+Same design as sl4n's `DurableFileTransport`, same goal as SyntropyLog's `DurableAdapterTransport` + `persistPath`.
+
+---
+
+## Testing your code
+
+`slpy.testing.SpyTransport` captures every emitted entry — **including masking output** — so tests assert on what would actually leave the process:
+
+```python
+from slpy.testing import SpyTransport
+
+spy = SpyTransport()
+await slpy.init({'logger': {'transports': [spy]}})
+
+# ...exercise your code...
+
+assert spy.count == 2
+assert spy.last_entry['level'] == 'audit'
+assert spy.at_level('error') == []
+assert spy.with_field('order_id', 'o-1')
+assert spy.any_message_contains('info', 'charged')
+assert spy.first_entry['password'] == '*******'   # masking already applied
+spy.clear()
+```
 
 ---
 
 ## Self-observability and the safety boundary
 
-The pipeline survives every failure silently (a logging framework must never crash your app). `get_stats()` is how you **see** those survivals — read it from a health endpoint:
+The pipeline survives every failure silently — a logging framework must never crash your app. `get_stats()` is how you **see** those survivals; read it from a health endpoint:
 
 ```python
 stats = slpy.get_stats()
 stats.logs_processed      # entries emitted
-stats.transport_failures  # transport.log() raised (isolated, healthy sinks unaffected)
+stats.transport_failures  # transport.log() raised (isolated — healthy sinks unaffected)
 stats.masking_failures    # masking failed (safe payload emitted instead)
 stats.uptime_seconds
 stats.native_active       # True when the Rust masking engine is in use
@@ -726,34 +434,23 @@ await slpy.init({
 
 **Log-injection defense:** ANSI escape sequences and control characters are stripped from every string value before transports — a crafted `user_agent` can't fake a log line, clear an operator's terminal, or smuggle escape codes into a log viewer.
 
+Runtime changes without restart: `slpy.set_level('debug')` and `slpy.reconfigure_logging_matrix({...})`.
+
 ---
 
-## Testing your code
+## Native engine (Rust)
 
-`slpy.testing.SpyTransport` captures every emitted entry — including masking output — so tests assert on what would actually leave the process:
+The optional `slpy-native` addon runs the masking engine in Rust. When installed it is used automatically — no code change; when absent, the pure-Python engine runs the **exact same semantics**. The two engines are locked together by a shared parity fixture (`tests/test_masking_parity.py`) asserting byte-identical output — the regression lock the family adopted after a native/JS divergence in the Node.js sibling leaked PII (its KNOWN-ISSUES #2).
 
-```python
-from slpy.testing import SpyTransport
-
-spy = SpyTransport()
-await slpy.init({'logger': {'transports': [spy]}})
-
-...exercise your code...
-
-assert spy.count == 2
-assert spy.last_entry['level'] == 'audit'
-assert spy.at_level('error') == []
-assert spy.with_field('order_id', 'o-1')
-assert spy.any_message_contains('info', 'charged')
-assert spy.first_entry['password'] == '*******'   # masking already applied
-spy.clear()
-```
+- Rules with a `custom_mask` Python callable can't cross into Rust — the engine transparently stays in Python (parity over speed).
+- Disable explicitly with the environment variable `SLPY_NATIVE_DISABLE=1`.
+- `slpy.get_stats().native_active` tells you which engine is running.
 
 ---
 
 ## Performance
 
-slpy includes an optional Rust addon (`slpy-native`) that accelerates the masking engine. When installed, it is used automatically with no code changes.
+Honest framing first: the numbers below compare slpy against loggers that **don't mask, correlate or filter** — their columns are a no-masking reference, not a race.
 
 ```
 Simple log             Complex object + masking
@@ -764,27 +461,13 @@ logging    18.8 µs     logging        20.4 µs  (no masking)
 loguru     58.9 µs     loguru         61.8 µs  (no masking)
 ```
 
-> pyperf, null transport, Windows 11 local — numbers above are conservative.
+> pyperf, null transport, Windows 11 local — conservative numbers.
 
-**slpy is the fastest structured logger on simple logs** — faster than structlog, which is the Python performance reference.
+- On simple logs slpy is the fastest structured logger measured — faster than structlog, the Python performance reference.
+- With masking **fully active**, slpy is still faster than stdlib `logging` without masking.
+- The Rust addon reduced masking overhead from 29 µs to 12 µs. Without it, the pure-Python engine runs transparently.
 
-**slpy with masking fully active is faster than the stdlib `logging` module without masking.** It is 3.4x faster than loguru without masking.
-
-The Rust addon reduced masking overhead from 29 µs to 12 µs (59% improvement). If the addon is not installed, slpy falls back to the pure Python engine transparently.
-
-### Sustained throughput — official results (GitHub Actions, Ubuntu, Python 3.12)
-
-| Scenario | logs/sec | µs/log | degradation |
-|----------|----------|--------|-------------|
-| Simple log | **85,774** | 11.7 | — |
-| MaskingEngine only | **59,369** | 16.8 | — |
-| child() + log | **58,165** | 17.2 | 0 B heap |
-| Complex log + masking | **33,472** | 29.9 | — |
-| Async context scope | **22,237** | 45.0 | none (1M → 10M: 44.97 → 44.76 µs) |
-
-Zero degradation across all scenarios. `child()` and async context scope allocate **0 bytes** at sustained volume — no GC pressure regardless of call volume.
-
-See [benchmark/README.md](benchmark/README.md) for full methodology and how to reproduce.
+Sustained throughput (GitHub Actions, Ubuntu, Python 3.12): 85k logs/sec simple, 33k logs/sec complex+masking, zero degradation from 1M to 10M calls, 0 B heap growth on `child()` and context scopes. Full methodology and reproduction: [benchmark/README.md](benchmark/README.md).
 
 ---
 
@@ -800,81 +483,49 @@ It is the component that makes every log line correct, consistent, and safe befo
 
 ---
 
-## Security
+## Security & supply chain
 
-**No network I/O at runtime.** slpy does not contact any external URLs. The only output is what your transports produce.
-
-**Zero runtime dependencies.** The core package has no `install_requires`. The optional `[fastapi]` extra adds only `starlette` (already a FastAPI dependency).
-
-**Masking and custom functions.** The `custom_mask` function in masking rules is consumer-supplied configuration — it is not influenced by external input. See [socket.dev note](#) for full analysis.
-
----
-
-## Installation
-
-```bash
-# Core (zero dependencies)
-pip install slpy-log
-
-# With FastAPI middleware
-pip install slpy-log[fastapi]
-
-# Development
-pip install slpy-log[dev]
-```
-
-Requires Python 3.7+.
+- **No network I/O at runtime.** slpy contacts no external URLs; the only output is what your transports produce.
+- **Zero runtime dependencies.** The core package has no `install_requires`. The optional `[fastapi]` extra adds only `starlette` (already a FastAPI dependency).
+- **Log-injection boundary** built in (ANSI/control-char stripping).
+- **Masking failsafe** — a masking failure yields a safe payload, never the raw metadata.
+- `custom_mask` functions in masking rules are consumer-supplied configuration, not influenced by external input.
 
 ---
 
-## Running the examples
+## What's in the box
 
-```bash
-git clone https://github.com/Syntropysoft/slpy
-cd slpy
-
-# Basic setup
-py examples/01_basic_setup.py
-
-# Named loggers and child()
-py examples/02_named_loggers_and_child.py
-
-# Context propagation with asyncio.gather()
-py examples/03_context_propagation.py
-
-# Data masking
-py examples/04_masking.py
-
-# with_meta() and audit level
-py examples/05_with_meta_and_audit.py
-
-# FastAPI middleware (requires: pip install fastapi uvicorn)
-uvicorn examples.06_fastapi_middleware:app --reload
-
-# PrettyConsoleTransport — colored output (run in a real terminal)
-py examples/07_pretty_console.py
-
-# AdapterTransport + UniversalAdapter — fanout to multiple destinations
-py examples/08_adapter_transport.py
-
-# Observability layer — outbound event tracing
-py examples/09_observability.py
-```
-
-## Running the tests
-
-```bash
-pip install slpy-log[dev]
-pytest
-```
+| Feature | One-liner | Where |
+|---|---|---|
+| **Logging Matrix** | Whitelist of context fields per level; `'*'` wildcard, `default` fallback, runtime reconfigure | `logging_matrix` config |
+| **MaskingEngine** | By field name at any depth; non-strings and nested values under a sensitive key included; `MASK_KEYS` + `mask_pattern()` | `masking` config |
+| **Native engine (Rust)** | Same semantics as Python, parity-locked; auto-detected | `pip install slpy-native` |
+| **Universal Adapter** | One `executor` → any backend | `AdapterTransport` + `UniversalAdapter` |
+| **DurableFileTransport** | Self-emptying disk spool; survives outages and restarts; at-least-once | `slpy.durable` |
+| **Retention policies** | Named compliance policies stamped per entry, matrix-proof | `retention_policies` config + `with_retention()` |
+| **Fluent API** | `child`, `with_meta`, `with_retention`; `audit` level always emits | `Logger` |
+| **Context propagation** | `contextvars` scopes; per-source inbound / per-target outbound wire names | `slpy.context()` / `context` config |
+| **FastAPI / ASGI** | One-line middleware extracts declared headers into context | `slpy-log[fastapi]` |
+| **Observability channel** | `OutboundEvent` on every `get_propagation_headers()` — separate transports, never masked | `observability` config |
+| **Safety boundary** | ANSI/control-char stripping; per-transport isolation; guarded hooks | built in |
+| **Self-observability** | `get_stats()` — processed/failure counters, uptime, engine in use | `slpy.get_stats()` |
+| **Testing toolkit** | `SpyTransport` — assert on emitted, masked entries | `slpy.testing` |
 
 ---
 
-## Documentation
+## Documentation & examples
 
-- **[Refactor plan and architecture](docs/slpy-refactor-plan.md)** — Design decisions and what was removed and why.
-- **[Data masking](docs/data_masking.md)** — Masking strategies, default rules, custom rules.
-- **[Logger matrix](docs/logger_matrix.md)** — Per-level field filtering.
+- **[Data masking](docs/data_masking.md)** · **[Logging matrix](docs/logger_matrix.md)** · **[Lifecycle](docs/lifecycle.md)** · **[Architecture & design decisions](docs/slpy-refactor-plan.md)**
+- **Runnable examples** (`examples/01`–`09`): basic setup, named loggers + `child()`, context propagation, masking, `with_meta` + audit, FastAPI middleware, pretty console, adapter transport fanout, observability events.
+- **The family:** [SyntropyLog (Node.js)](https://github.com/Syntropysoft/SyntropyLog) — the reference implementation · [sl4n (.NET)](https://github.com/Syntropysoft/sl4n)
+
+```bash
+git clone https://github.com/Syntropysoft/syntropylog.py
+cd syntropylog.py
+python examples/01_basic_setup.py
+```
+
+Tests: `pip install slpy-log[dev] && pytest`
 
 ---
 

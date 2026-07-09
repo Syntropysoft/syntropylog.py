@@ -67,6 +67,11 @@ PARITY_CASES = [
         {"password": None},
     ),
     (
+        "BARE aliases are covered (credit_card / ssn / phone without suffix)",
+        {"credit_card": "4111-1111-1111-1234", "ssn": "123-45-6789", "phone": "+1 (555) 123-4567"},
+        {"credit_card": "************1234", "ssn": "*****6789", "phone": "*******4567"},
+    ),
+    (
         "non-sensitive fields untouched",
         {"amount": 299.9, "name": "John Doe", "ok": True},
         {"amount": 299.9, "name": "John Doe", "ok": True},
