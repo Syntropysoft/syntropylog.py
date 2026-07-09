@@ -74,6 +74,8 @@ class SyntropyLog:
         self._masking = MaskingEngine(
             enable_default_rules=masking_cfg.enable_default_rules,
             extra_rules=extra_rules or None,
+            max_depth=masking_cfg.max_depth,
+            on_masking_error=masking_cfg.on_masking_error,
         )
 
         # Transports — fall back to ConsoleTransport if none provided

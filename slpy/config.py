@@ -37,6 +37,8 @@ class MaskingConfig:
     enable_default_rules: bool = True
     rules: List[Dict[str, Any]] = field(default_factory=list)
     max_depth: int = 10
+    # Called when masking fails (never receives the raw payload). Never raises.
+    on_masking_error: Optional[Any] = None
 
 
 @dataclass
@@ -72,6 +74,7 @@ class ConfigManager:
                 enable_default_rules=masking_raw.get("enable_default_rules", True),
                 rules=masking_raw.get("rules", []),
                 max_depth=masking_raw.get("max_depth", 10),
+                on_masking_error=masking_raw.get("on_masking_error"),
             ),
             observability=ObservabilityConfig(
                 transports=obs_raw.get("transports", []),
