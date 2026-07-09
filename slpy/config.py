@@ -13,6 +13,8 @@ from typing import Any, Dict, List, Optional
 class LoggerConfig:
     level: str = "info"
     transports: List[Any] = field(default_factory=list)
+    # Called when a transport raises: on_log_failure(exc, transport). Never raises.
+    on_log_failure: Optional[Any] = None
 
 
 @dataclass
@@ -64,6 +66,7 @@ class ConfigManager:
             logger=LoggerConfig(
                 level=level,
                 transports=logger_raw.get("transports", []),
+                on_log_failure=logger_raw.get("on_log_failure"),
             ),
             context=ContextConfig(
                 inbound=context_raw.get("inbound", {}),

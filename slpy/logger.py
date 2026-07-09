@@ -6,12 +6,15 @@ Synchronous hot path — no background workers, no queues.
 """
 
 import time
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
+
+from .sanitize import clean_tree
 
 if TYPE_CHECKING:
     from .masking import MaskingEngine
     from .context import ContextManager
     from .matrix import LoggingMatrix
+    from .stats import SlpyStats
     from .transport import Transport
 
 _LEVEL_ORDER = {"debug": 0, "info": 1, "warn": 2, "error": 3, "audit": 4, "silent": 99}
@@ -35,6 +38,8 @@ class Logger:
         context_mgr: Optional["ContextManager"],
         bindings: Optional[Dict[str, Any]] = None,
         matrix: Optional["LoggingMatrix"] = None,
+        stats: Optional["SlpyStats"] = None,
+        on_log_failure: Optional[Callable[[BaseException, "Transport"], None]] = None,
     ) -> None:
         self._name = name
         self._level = level
@@ -43,6 +48,8 @@ class Logger:
         self._context_mgr = context_mgr
         self._bindings: Dict[str, Any] = bindings or {}
         self._matrix = matrix
+        self._stats = stats
+        self._on_log_failure = on_log_failure
 
     # ------------------------------------------------------------------
     # Fluent API
@@ -58,6 +65,8 @@ class Logger:
             context_mgr=self._context_mgr,
             bindings={**self._bindings, **bindings},
             matrix=self._matrix,
+            stats=self._stats,
+            on_log_failure=self._on_log_failure,
         )
 
     def with_meta(self, payload: Dict[str, Any]) -> "Logger":
@@ -119,12 +128,28 @@ class Logger:
             **kwargs,
         }
 
-        # Apply masking
+        # Apply masking, then the injection boundary (strip ANSI/control chars)
         if self._masking:
             entry = self._masking.process(entry)
+        entry = clean_tree(entry)
+
+        if self._stats is not None:
+            self._stats.incr_logs_processed()
 
         for transport in self._transports:
             try:
                 transport.log(entry)
-            except Exception:
-                pass  # Silent observer
+            except Exception as exc:
+                self._report_transport_failure(exc, transport)
+
+    def _report_transport_failure(self, exc: BaseException, transport: "Transport") -> None:
+        """Silent Observer: a broken transport never takes the app down —
+        but the failure is counted and surfaced through the hook."""
+        if self._stats is not None:
+            self._stats.incr_transport_failures()
+        if self._on_log_failure is None:
+            return
+        try:
+            self._on_log_failure(exc, transport)
+        except Exception:
+            pass  # the failure hook must never take the pipeline down

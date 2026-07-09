@@ -13,6 +13,7 @@ from .logger import Logger
 from .masking import MaskingEngine, MaskingRule, MaskingStrategy
 from .matrix import LoggingMatrix
 from .observability import ConsoleObservabilityTransport, ObservabilityEngine, OutboundEvent
+from .stats import SlpyStats, StatsSnapshot
 from .transport import ConsoleTransport, Transport
 
 
@@ -35,6 +36,7 @@ class SyntropyLog:
         self._observability: Optional[ObservabilityEngine] = None
         self._loggers: Dict[str, Logger] = {}
         self._matrix: Optional[LoggingMatrix] = None
+        self._stats: Optional[SlpyStats] = None
 
     async def init(self, config: Optional[Dict[str, Any]] = None) -> None:
         """
@@ -59,6 +61,9 @@ class SyntropyLog:
 
         # Logging Matrix — per-level whitelist of context fields
         self._matrix = LoggingMatrix.create(cfg.logging_matrix)
+
+        # Self-observability counters (slpy.get_stats())
+        self._stats = SlpyStats()
 
         # Masking
         masking_cfg = cfg.masking
@@ -101,6 +106,7 @@ class SyntropyLog:
         self._observability = None
         self._loggers = {}
         self._matrix = None
+        self._stats = None
 
     # ------------------------------------------------------------------
     # Public API
@@ -122,6 +128,8 @@ class SyntropyLog:
                 masking=self._masking,
                 context_mgr=self._context,
                 matrix=self._matrix,
+                stats=self._stats,
+                on_log_failure=self._config.logger.on_log_failure,
             )
         return self._loggers[name]
 
@@ -225,6 +233,24 @@ class SyntropyLog:
         """
         self._require_initialized()
         return self._config.context.outbound.get("http", {}).get(field_name)
+
+    def get_stats(self) -> StatsSnapshot:
+        """
+        Snapshot of the pipeline's health counters — how many entries were
+        processed, and how many failures the Silent Observer absorbed.
+
+            stats = slpy.get_stats()
+            stats.logs_processed      # entries emitted
+            stats.transport_failures  # transport.log() raised (isolated)
+            stats.masking_failures    # masking failed (safe payload emitted)
+            stats.uptime_seconds
+            stats.native_active       # Rust masking engine in use
+        """
+        self._require_initialized()
+        return self._stats.snapshot(
+            masking_failures=self._masking.failures if self._masking else 0,
+            native_active=self._masking.is_native if self._masking else False,
+        )
 
     @property
     def is_initialized(self) -> bool:
