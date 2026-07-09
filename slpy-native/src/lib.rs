@@ -1,9 +1,13 @@
 /// slpy-native — Rust masking engine for slpy
 ///
 /// Exposes a single Python class: `NativeMaskingEngine`
-/// Same interface as slpy's Python MaskingEngine — drop-in replacement.
+/// Same interface AND same semantics as slpy's Python MaskingEngine — a
+/// drop-in twin. The two engines must never diverge: masking is BY FIELD
+/// NAME, matched on each dict key on the way down; once a key matches,
+/// everything beneath it is masked (nested dicts, lists, and non-string
+/// scalars included).
 ///
-///     engine = NativeMaskingEngine(enable_default_rules=True)
+///     engine = NativeMaskingEngine(enable_default_rules=True, max_depth=10)
 ///     engine.add_rule(pattern, strategy, mask_char='*')
 ///     result = engine.process(data)   # data: dict|list
 ///
@@ -11,27 +15,34 @@
 
 use once_cell::sync::Lazy;
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyList};
+use pyo3::types::{PyDict, PyList, PyTuple};
 use regex::Regex;
-use std::collections::HashMap;
 
 // ---------------------------------------------------------------------------
 // Default patterns — compiled once at module load
 // ---------------------------------------------------------------------------
+// Kept in lockstep with slpy/masking.py _DEFAULT_RULES — loose suffix patterns
+// for derived names + anchored alternates for the bare aliases.
 static DEFAULT_RULES: Lazy<Vec<(Regex, Strategy)>> = Lazy::new(|| {
     vec![
-        (re(r"(?i)(?:credit|card|cc|payment).*?(?:number|num|id)"), Strategy::CreditCard),
-        (re(r"(?i)(?:ssn|social|security).*?(?:number|num)"),       Strategy::Ssn),
-        (re(r"(?i)(?:email|mail|e-mail)"),                           Strategy::Email),
-        (re(r"(?i)(?:phone|tel|mobile|cell).*?(?:number|num)"),      Strategy::Phone),
-        (re(r"(?i)(?:password|pass|pwd|secret)"),                    Strategy::Full),
-        (re(r"(?i)(?:token|key|auth|jwt|bearer)"),                   Strategy::Full),
+        (re(r"(?i)(?:credit|card|cc|payment).*?(?:number|num|id)|^(?i)(?:credit_?card|card_?number)$"), Strategy::CreditCard),
+        (re(r"(?i)(?:ssn|social|security).*?(?:number|num)|^(?i)(?:ssn|social_?security)$"),            Strategy::Ssn),
+        (re(r"(?i)(?:email|mail|e-mail)"),                                                               Strategy::Email),
+        (re(r"(?i)(?:phone|tel|mobile|cell).*?(?:number|num)|^(?i)(?:phone|mobile|tel|cell)$"),          Strategy::Phone),
+        (re(r"(?i)(?:password|pass|pwd|secret)"),                                                        Strategy::Full),
+        (re(r"(?i)(?:token|key|auth|jwt|bearer)"),                                                       Strategy::Full),
     ]
 });
 
 fn re(pat: &str) -> Regex {
     Regex::new(pat).expect("invalid default pattern")
 }
+
+// ReDoS guard — rules only ever run against field NAMES; cap the input.
+const MAX_KEY_LEN: usize = 256;
+
+// Fixed-width replacement when the depth budget runs out under a sensitive key.
+const EXHAUSTED_MASK_LEN: usize = 6;
 
 // ---------------------------------------------------------------------------
 // Strategy
@@ -59,25 +70,27 @@ impl Strategy {
 
 fn apply(value: &str, strategy: &Strategy, mask_char: char) -> String {
     match strategy {
-        Strategy::Full => mask_char.to_string().repeat(value.len()),
+        Strategy::Full => mask_char.to_string().repeat(value.chars().count()),
 
         Strategy::Email => {
             if let Some(at) = value.find('@') {
                 let user = &value[..at];
                 let domain = &value[at..];
-                let masked = if user.len() > 2 {
+                let user_len = user.chars().count();
+                let masked = if user_len > 2 {
+                    let chars: Vec<char> = user.chars().collect();
                     format!(
                         "{}{}{}",
-                        &user[..1],
-                        mask_char.to_string().repeat(user.len() - 2),
-                        &user[user.len() - 1..]
+                        chars[0],
+                        mask_char.to_string().repeat(user_len - 2),
+                        chars[user_len - 1]
                     )
                 } else {
-                    mask_char.to_string().repeat(user.len())
+                    mask_char.to_string().repeat(user_len)
                 };
                 format!("{}{}", masked, domain)
             } else {
-                mask_char.to_string().repeat(value.len())
+                mask_char.to_string().repeat(value.chars().count())
             }
         }
 
@@ -87,82 +100,14 @@ fn apply(value: &str, strategy: &Strategy, mask_char: char) -> String {
                 let last4 = &digits[digits.len() - 4..];
                 format!("{}{}", mask_char.to_string().repeat(digits.len() - 4), last4)
             } else {
-                mask_char.to_string().repeat(value.len())
+                mask_char.to_string().repeat(value.chars().count())
             }
         }
     }
 }
 
 // ---------------------------------------------------------------------------
-// Flat value — either a string (maskable) or an opaque Python object
-// ---------------------------------------------------------------------------
-enum Flat {
-    Str(String),
-    Obj(PyObject),
-}
-
-// ---------------------------------------------------------------------------
-// Flatten any dict/list into a dotted-key → Flat map
-// ---------------------------------------------------------------------------
-fn flatten(obj: &Bound<'_, PyAny>, prefix: &str, out: &mut HashMap<String, Flat>) -> PyResult<()> {
-    if let Ok(dict) = obj.downcast::<PyDict>() {
-        for (k, v) in dict.iter() {
-            let key = k.str()?.to_string();
-            let path = if prefix.is_empty() { key } else { format!("{}.{}", prefix, key) };
-            flatten(&v, &path, out)?;
-        }
-    } else if let Ok(list) = obj.downcast::<PyList>() {
-        for (i, v) in list.iter().enumerate() {
-            let path = if prefix.is_empty() { i.to_string() } else { format!("{}.{}", prefix, i) };
-            flatten(&v, &path, out)?;
-        }
-    } else if let Ok(s) = obj.extract::<String>() {
-        out.insert(prefix.to_string(), Flat::Str(s));
-    } else {
-        out.insert(prefix.to_string(), Flat::Obj(obj.clone().unbind()));
-    }
-    Ok(())
-}
-
-// ---------------------------------------------------------------------------
-// Unflatten dotted-key map back into a nested PyDict
-// ---------------------------------------------------------------------------
-fn unflatten<'py>(py: Python<'py>, flat: &HashMap<String, Flat>) -> PyResult<Bound<'py, PyDict>> {
-    let mut keys: Vec<&String> = flat.keys().collect();
-    keys.sort();
-
-    let root = PyDict::new(py);
-    for key in keys {
-        let parts: Vec<&str> = key.split('.').collect();
-        let mut node = root.clone().into_any();
-        for part in &parts[..parts.len() - 1] {
-            let next = if let Ok(d) = node.downcast::<PyDict>() {
-                match d.get_item(part)? {
-                    Some(existing) => existing,
-                    None => {
-                        let new_d = PyDict::new(py);
-                        d.set_item(part, &new_d)?;
-                        new_d.into_any()
-                    }
-                }
-            } else {
-                break;
-            };
-            node = next;
-        }
-        let last = parts[parts.len() - 1];
-        if let Ok(d) = node.downcast::<PyDict>() {
-            match &flat[key] {
-                Flat::Str(s) => d.set_item(last, s)?,
-                Flat::Obj(o) => d.set_item(last, o.bind(py))?,
-            }
-        }
-    }
-    Ok(root)
-}
-
-// ---------------------------------------------------------------------------
-// NativeMaskingEngine — exposed to Python
+// Rules
 // ---------------------------------------------------------------------------
 struct Rule {
     pattern: Regex,
@@ -170,16 +115,89 @@ struct Rule {
     mask_char: char,
 }
 
+/// First rule whose pattern matches the (length-capped) field name.
+fn find_rule<'a>(rules: &'a [Rule], key: &str) -> Option<&'a Rule> {
+    let name: String = key.chars().take(MAX_KEY_LEN).collect();
+    rules.iter().find(|r| r.pattern.is_match(&name))
+}
+
+/// Mask a scalar. Non-strings are stringified first; None passes through.
+fn mask_leaf(py: Python<'_>, value: &Bound<'_, PyAny>, rule: &Rule) -> PyResult<Py<PyAny>> {
+    if value.is_none() {
+        return Ok(py.None());
+    }
+    let text = match value.extract::<String>() {
+        Ok(s) => s,
+        Err(_) => value.str()?.to_string(),
+    };
+    Ok(apply(&text, &rule.strategy, rule.mask_char).into_pyobject(py)?.into_any().unbind())
+}
+
+/// Recursively mask a structure. `active` is the rule inherited from the
+/// closest matching ancestor key; a deeper key matching its own rule
+/// overrides it. Mirrors slpy.masking._mask_tree exactly.
+fn mask_tree(
+    py: Python<'_>,
+    value: &Bound<'_, PyAny>,
+    rules: &[Rule],
+    active: Option<&Rule>,
+    depth: u32,
+) -> PyResult<Py<PyAny>> {
+    if depth == 0 {
+        return match active {
+            None => Ok(value.clone().unbind()),
+            Some(rule) => Ok(rule
+                .mask_char
+                .to_string()
+                .repeat(EXHAUSTED_MASK_LEN)
+                .into_pyobject(py)?
+                .into_any()
+                .unbind()),
+        };
+    }
+    if let Ok(dict) = value.cast::<PyDict>() {
+        let out = PyDict::new(py);
+        for (k, v) in dict.iter() {
+            let key = k.str()?.to_string();
+            let rule = find_rule(rules, &key).or(active);
+            out.set_item(k, mask_tree(py, &v, rules, rule, depth - 1)?)?;
+        }
+        return Ok(out.into_any().unbind());
+    }
+    if let Ok(list) = value.cast::<PyList>() {
+        let items = list
+            .iter()
+            .map(|v| mask_tree(py, &v, rules, active, depth - 1))
+            .collect::<PyResult<Vec<_>>>()?;
+        return Ok(PyList::new(py, items)?.into_any().unbind());
+    }
+    if let Ok(tuple) = value.cast::<PyTuple>() {
+        let items = tuple
+            .iter()
+            .map(|v| mask_tree(py, &v, rules, active, depth - 1))
+            .collect::<PyResult<Vec<_>>>()?;
+        return Ok(PyList::new(py, items)?.into_any().unbind());
+    }
+    match active {
+        None => Ok(value.clone().unbind()),
+        Some(rule) => mask_leaf(py, value, rule),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// NativeMaskingEngine — exposed to Python
+// ---------------------------------------------------------------------------
 #[pyclass]
 struct NativeMaskingEngine {
     rules: Vec<Rule>,
+    max_depth: u32,
 }
 
 #[pymethods]
 impl NativeMaskingEngine {
     #[new]
-    #[pyo3(signature = (enable_default_rules = true))]
-    fn new(enable_default_rules: bool) -> Self {
+    #[pyo3(signature = (enable_default_rules = true, max_depth = 10))]
+    fn new(enable_default_rules: bool, max_depth: u32) -> Self {
         let mut rules = Vec::new();
         if enable_default_rules {
             for (re, strategy) in DEFAULT_RULES.iter() {
@@ -190,7 +208,7 @@ impl NativeMaskingEngine {
                 });
             }
         }
-        NativeMaskingEngine { rules }
+        NativeMaskingEngine { rules, max_depth }
     }
 
     #[pyo3(signature = (pattern, strategy, mask_char = '*', preserve_length = true))]
@@ -202,7 +220,7 @@ impl NativeMaskingEngine {
         preserve_length: bool,
     ) -> PyResult<()> {
         let _ = preserve_length; // API parity with Python engine
-        let re = Regex::new(pattern)
+        let re = Regex::new(&format!("(?i){}", pattern))
             .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
         self.rules.push(Rule {
             pattern: re,
@@ -212,27 +230,11 @@ impl NativeMaskingEngine {
         Ok(())
     }
 
-    fn process<'py>(&self, py: Python<'py>, data: &Bound<'py, PyAny>) -> PyResult<PyObject> {
+    fn process<'py>(&self, py: Python<'py>, data: &Bound<'py, PyAny>) -> PyResult<Py<PyAny>> {
         if !data.is_instance_of::<PyDict>() && !data.is_instance_of::<PyList>() {
             return Ok(data.clone().unbind());
         }
-
-        let mut flat: HashMap<String, Flat> = HashMap::new();
-        flatten(data, "", &mut flat)?;
-
-        for (key, value) in flat.iter_mut() {
-            if let Flat::Str(s) = value {
-                let leaf = key.rsplit('.').next().unwrap_or(key.as_str());
-                for rule in &self.rules {
-                    if rule.pattern.is_match(leaf) {
-                        *value = Flat::Str(apply(s, &rule.strategy, rule.mask_char));
-                        break;
-                    }
-                }
-            }
-        }
-
-        Ok(unflatten(py, &flat)?.into_any().unbind())
+        mask_tree(py, data, &self.rules, None, self.max_depth)
     }
 }
 

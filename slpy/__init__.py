@@ -23,8 +23,12 @@ Quick start:
 """
 
 from .core import SyntropyLog
+from .durable import DurableFileTransport
 from .transport import Transport, ConsoleTransport, PrettyConsoleTransport, UniversalAdapter, AdapterTransport
-from .masking import MaskingEngine, MaskingRule, MaskingStrategy
+from .masking import MASK_KEYS, MaskingEngine, MaskingRule, MaskingStrategy, mask_pattern
+from .matrix import LoggingMatrix
+from .retention import RetentionPolicy, RetentionRegistry
+from .stats import StatsSnapshot
 from .observability import ObservabilityTransport, ConsoleObservabilityTransport, OutboundEvent
 from .logger import Logger
 
@@ -39,15 +43,22 @@ __all__ = [
     "PrettyConsoleTransport",
     "UniversalAdapter",
     "AdapterTransport",
+    "DurableFileTransport",
     "MaskingEngine",
     "MaskingRule",
     "MaskingStrategy",
+    "MASK_KEYS",
+    "mask_pattern",
+    "LoggingMatrix",
+    "StatsSnapshot",
+    "RetentionPolicy",
+    "RetentionRegistry",
     "ObservabilityTransport",
     "ConsoleObservabilityTransport",
     "OutboundEvent",
     "Logger",
 ]
 
-__version__ = "0.3.2"
+__version__ = "0.4.0"
 __author__ = "Syntropysoft"
 __license__ = "Apache-2.0"

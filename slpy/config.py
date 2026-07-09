@@ -13,6 +13,8 @@ from typing import Any, Dict, List, Optional
 class LoggerConfig:
     level: str = "info"
     transports: List[Any] = field(default_factory=list)
+    # Called when a transport raises: on_log_failure(exc, transport). Never raises.
+    on_log_failure: Optional[Any] = None
 
 
 @dataclass
@@ -37,6 +39,8 @@ class MaskingConfig:
     enable_default_rules: bool = True
     rules: List[Dict[str, Any]] = field(default_factory=list)
     max_depth: int = 10
+    # Called when masking fails (never receives the raw payload). Never raises.
+    on_masking_error: Optional[Any] = None
 
 
 @dataclass
@@ -45,6 +49,10 @@ class Config:
     context: ContextConfig = field(default_factory=ContextConfig)
     masking: MaskingConfig = field(default_factory=MaskingConfig)
     observability: ObservabilityConfig = field(default_factory=ObservabilityConfig)
+    # Per-level whitelist of context fields: {'default': [...], 'info': [...], 'error': ['*']}
+    logging_matrix: Dict[str, List[str]] = field(default_factory=dict)
+    # Named retention policies: {'SOX_AUDIT_TRAIL': {'days': 2555, 'class': 'SOX'}}
+    retention_policies: Dict[str, Any] = field(default_factory=dict)
 
 
 class ConfigManager:
@@ -60,6 +68,7 @@ class ConfigManager:
             logger=LoggerConfig(
                 level=level,
                 transports=logger_raw.get("transports", []),
+                on_log_failure=logger_raw.get("on_log_failure"),
             ),
             context=ContextConfig(
                 inbound=context_raw.get("inbound", {}),
@@ -70,11 +79,14 @@ class ConfigManager:
                 enable_default_rules=masking_raw.get("enable_default_rules", True),
                 rules=masking_raw.get("rules", []),
                 max_depth=masking_raw.get("max_depth", 10),
+                on_masking_error=masking_raw.get("on_masking_error"),
             ),
             observability=ObservabilityConfig(
                 transports=obs_raw.get("transports", []),
                 enabled=obs_raw.get("enabled", True),
             ),
+            logging_matrix=raw.get("logging_matrix", {}),
+            retention_policies=raw.get("retention_policies", {}),
         )
 
     def validate(self) -> None:
@@ -100,3 +112,11 @@ class ConfigManager:
     @property
     def observability(self) -> ObservabilityConfig:
         return self._config.observability
+
+    @property
+    def logging_matrix(self) -> Dict[str, List[str]]:
+        return self._config.logging_matrix
+
+    @property
+    def retention_policies(self) -> Dict[str, Any]:
+        return self._config.retention_policies

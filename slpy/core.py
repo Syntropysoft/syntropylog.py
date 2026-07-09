@@ -11,7 +11,10 @@ from .config import ConfigManager
 from .context import ContextManager
 from .logger import Logger
 from .masking import MaskingEngine, MaskingRule, MaskingStrategy
+from .matrix import LoggingMatrix
 from .observability import ConsoleObservabilityTransport, ObservabilityEngine, OutboundEvent
+from .retention import RetentionRegistry
+from .stats import SlpyStats, StatsSnapshot
 from .transport import ConsoleTransport, Transport
 
 
@@ -33,6 +36,9 @@ class SyntropyLog:
         self._transports: list = []
         self._observability: Optional[ObservabilityEngine] = None
         self._loggers: Dict[str, Logger] = {}
+        self._matrix: Optional[LoggingMatrix] = None
+        self._stats: Optional[SlpyStats] = None
+        self._retention: Optional[RetentionRegistry] = None
 
     async def init(self, config: Optional[Dict[str, Any]] = None) -> None:
         """
@@ -55,6 +61,15 @@ class SyntropyLog:
         # Context
         self._context = ContextManager()
 
+        # Logging Matrix — per-level whitelist of context fields
+        self._matrix = LoggingMatrix.create(cfg.logging_matrix)
+
+        # Self-observability counters (slpy.get_stats())
+        self._stats = SlpyStats()
+
+        # Retention policies — compliance metadata resolved by name
+        self._retention = RetentionRegistry.create(cfg.retention_policies)
+
         # Masking
         masking_cfg = cfg.masking
         extra_rules = [
@@ -69,6 +84,8 @@ class SyntropyLog:
         self._masking = MaskingEngine(
             enable_default_rules=masking_cfg.enable_default_rules,
             extra_rules=extra_rules or None,
+            max_depth=masking_cfg.max_depth,
+            on_masking_error=masking_cfg.on_masking_error,
         )
 
         # Transports — fall back to ConsoleTransport if none provided
@@ -93,6 +110,9 @@ class SyntropyLog:
         self._transports = []
         self._observability = None
         self._loggers = {}
+        self._matrix = None
+        self._stats = None
+        self._retention = None
 
     # ------------------------------------------------------------------
     # Public API
@@ -113,6 +133,10 @@ class SyntropyLog:
                 transports=self._transports,
                 masking=self._masking,
                 context_mgr=self._context,
+                matrix=self._matrix,
+                stats=self._stats,
+                on_log_failure=self._config.logger.on_log_failure,
+                retention=self._retention,
             )
         return self._loggers[name]
 
@@ -134,6 +158,20 @@ class SyntropyLog:
         self._config.logger.level = level
         for logger in self._loggers.values():
             logger._level = level
+
+    def reconfigure_logging_matrix(self, matrix: Dict[str, list]) -> None:
+        """
+        Replace the Logging Matrix at runtime — no restart needed.
+
+        Security boundary: only context-field visibility changes; masking,
+        levels and transports stay as set at init().
+
+            slpy.reconfigure_logging_matrix({'default': ['correlation_id'], 'error': ['*']})
+        """
+        self._require_initialized()
+        self._matrix = LoggingMatrix.create(matrix)
+        for logger in self._loggers.values():
+            logger._matrix = self._matrix
 
     def get_propagation_headers(self, target: Optional[str] = None) -> Dict[str, str]:
         """
@@ -202,6 +240,24 @@ class SyntropyLog:
         """
         self._require_initialized()
         return self._config.context.outbound.get("http", {}).get(field_name)
+
+    def get_stats(self) -> StatsSnapshot:
+        """
+        Snapshot of the pipeline's health counters — how many entries were
+        processed, and how many failures the Silent Observer absorbed.
+
+            stats = slpy.get_stats()
+            stats.logs_processed      # entries emitted
+            stats.transport_failures  # transport.log() raised (isolated)
+            stats.masking_failures    # masking failed (safe payload emitted)
+            stats.uptime_seconds
+            stats.native_active       # Rust masking engine in use
+        """
+        self._require_initialized()
+        return self._stats.snapshot(
+            masking_failures=self._masking.failures if self._masking else 0,
+            native_active=self._masking.is_native if self._masking else False,
+        )
 
     @property
     def is_initialized(self) -> bool:

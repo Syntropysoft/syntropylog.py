@@ -42,6 +42,21 @@ _LEVEL_LABEL: Dict[str, str] = {
 _CORE_FIELDS = frozenset({"level", "message", "timestamp", "service"})
 
 
+def _format_clock(timestamp: Any) -> str:
+    """HH:MM:SS.mmm from an ISO-8601 string (the family format) or a
+    legacy epoch-milliseconds number. Anything else → empty."""
+    if isinstance(timestamp, str):
+        try:
+            dt = datetime.datetime.fromisoformat(timestamp)
+        except ValueError:
+            return ""
+        return dt.strftime("%H:%M:%S") + f".{dt.microsecond // 1000:03d}"
+    if isinstance(timestamp, (int, float)):
+        dt = datetime.datetime.fromtimestamp(timestamp / 1000)
+        return dt.strftime("%H:%M:%S") + f".{dt.microsecond // 1000:03d}"
+    return ""
+
+
 class Transport:
     """Base transport. Override log() in subclasses."""
 
@@ -116,12 +131,7 @@ class PrettyConsoleTransport(Transport):
         service   = str(entry.get("service", ""))
         timestamp = entry.get("timestamp")
 
-        # Timestamp — milliseconds epoch → HH:MM:SS.mmm
-        if isinstance(timestamp, (int, float)):
-            dt = datetime.datetime.fromtimestamp(timestamp / 1000)
-            ts = dt.strftime("%H:%M:%S") + f".{dt.microsecond // 1000:03d}"
-        else:
-            ts = ""
+        ts = _format_clock(timestamp)
 
         style = _LEVEL_STYLE.get(level, _LEVEL_STYLE["info"])
         label = _LEVEL_LABEL.get(level, level.upper()[:5].ljust(5))
