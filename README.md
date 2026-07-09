@@ -23,7 +23,9 @@
 
 ---
 
-## What's new in 0.4.0
+## What's new in 1.0.0
+
+**First stable release.** slpy now covers the same conceptual surface as its siblings (SyntropyLog for Node.js, sl4n for .NET) and is marked Production/Stable; from here semantic versioning applies — breaking changes only in major versions. Everything below is new since 0.3.x:
 
 - **Logging Matrix** — a per-level whitelist of context fields, declared once. [Section ›](#logging-matrix--the-differentiator)
 - **Retention policies** — named compliance policies (`with_retention('SOX_AUDIT_TRAIL')`) stamped on every tagged entry. [Section ›](#compliance-routing--retention-as-data)

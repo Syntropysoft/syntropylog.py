@@ -31,7 +31,7 @@ setup(
     description="The Declarative Observability Framework for Python",
     long_description=read_readme(),
     long_description_content_type="text/markdown",
-    url="https://github.com/Syntropysoft/slpy",
+    url="https://github.com/Syntropysoft/syntropylog.py",
     packages=find_packages(include=["slpy", "slpy.*"]),
     python_requires=">=3.7",
     install_requires=[],  # zero runtime dependencies
@@ -46,7 +46,7 @@ setup(
         ],
     },
     classifiers=[
-        "Development Status :: 3 - Alpha",
+        "Development Status :: 5 - Production/Stable",
         "Intended Audience :: Developers",
         "License :: OSI Approved :: Apache Software License",
         "Operating System :: OS Independent",
