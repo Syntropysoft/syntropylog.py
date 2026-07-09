@@ -23,6 +23,7 @@ Quick start:
 """
 
 from .core import SyntropyLog
+from .durable import DurableFileTransport
 from .transport import Transport, ConsoleTransport, PrettyConsoleTransport, UniversalAdapter, AdapterTransport
 from .masking import MASK_KEYS, MaskingEngine, MaskingRule, MaskingStrategy, mask_pattern
 from .matrix import LoggingMatrix
@@ -41,6 +42,7 @@ __all__ = [
     "PrettyConsoleTransport",
     "UniversalAdapter",
     "AdapterTransport",
+    "DurableFileTransport",
     "MaskingEngine",
     "MaskingRule",
     "MaskingStrategy",

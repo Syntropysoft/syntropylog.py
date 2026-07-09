@@ -5,10 +5,16 @@ Named loggers with child() and with_meta() for declarative context binding.
 Synchronous hot path — no background workers, no queues.
 """
 
-import time
+from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 
 from .sanitize import clean_tree
+
+
+def _iso_timestamp() -> str:
+    """ISO-8601 with milliseconds and offset — the family timestamp format
+    (identical to SyntropyLog and sl4n): 2026-07-09T14:00:00.123+00:00"""
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
 
 if TYPE_CHECKING:
     from .masking import MaskingEngine
@@ -121,7 +127,7 @@ class Logger:
         entry: Dict[str, Any] = {
             "level": level,
             "message": message,
-            "timestamp": int(time.time() * 1000),
+            "timestamp": _iso_timestamp(),
             "service": self._name,
             **ctx,
             **self._bindings,
