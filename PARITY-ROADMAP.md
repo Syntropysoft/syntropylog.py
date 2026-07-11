@@ -29,6 +29,16 @@ the remaining gaps vs the JS reference, so findings live in a roadmap like every
 - **Safety** — `on_log_failure`, `on_masking_error` (never-throw, counted), `get_stats()`,
   durable spool transport, `AdapterTransport` fallback-to-console, `SpyTransport` testing kit.
 
+## Security hardening (2026-07-10, family-wide ReDoS audit)
+
+Measured finding: the 256-char key cap did NOT bound nested-quantifier patterns — `(a+)+$`
+hangs CPython at 40 chars, and `re` has no timeout API. Fix shipped (`61b4dcc`): a static
+star-height scanner (`slpy/_regex_safety.py`, mirror of SyntropyLog's `regexSafety.ts`)
+rejects explosive custom patterns at `MaskingRule` construction — init-time fail-fast.
+Residual pinned by test: overlapping alternation (`(a|a)*`) is not statically detectable;
+slpy-native (Rust `regex` crate, linear-time) remains immune by construction — **lo
+declarativo es la salvación**.
+
 ## Python salvedades (intentional — keep them)
 
 - **`SerializationManager` and `BrokerManager` were deliberately removed** in the slpy refactor
