@@ -4,7 +4,7 @@
 durable / safety / testing / canonical masking) — 158 tests green on `develop`. This document
 records what a **source audit (2026-07-10**, done while planning the JVM port**)** verified, and
 the remaining gaps vs the JS reference, so findings live in a roadmap like every family member
-(sl4n and syntropylog-jvm have the same file).
+(sl4n and syntropylog-java have the same file).
 
 ---
 
