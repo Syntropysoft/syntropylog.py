@@ -22,6 +22,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from ._regex_safety import assert_safe_key_pattern
+
 # ---------------------------------------------------------------------------
 # Native addon — loaded once, used transparently
 # ---------------------------------------------------------------------------
@@ -53,6 +55,12 @@ class MaskingRule:
     mask_char: str = "*"
 
     def __post_init__(self) -> None:
+        # ReDoS defense happens HERE, at rule construction — not on the log hot path.
+        # CPython's `re` cannot be interrupted mid-match (no timeout exists), so an
+        # explosive pattern is rejected before it can ever run; the 256-char key cap
+        # alone does NOT bound a nested quantifier (measured: (a+)+$ hangs at 40 chars).
+        # Default rules are known-safe alternations and pass trivially.
+        assert_safe_key_pattern(self.pattern)
         self._compiled = re.compile(self.pattern, re.IGNORECASE)
 
 
