@@ -23,17 +23,10 @@
 
 ---
 
-## What's new in 1.0.0
+## What's new
 
-**First stable release.** slpy now covers the same conceptual surface as its siblings (SyntropyLog for Node.js, sl4n for .NET) and is marked Production/Stable; from here semantic versioning applies — breaking changes only in major versions. Everything below is new since 0.3.x:
-
-- **Logging Matrix** — a per-level whitelist of context fields, declared once. [Section ›](#logging-matrix--the-differentiator)
-- **Retention policies** — named compliance policies (`with_retention('SOX_AUDIT_TRAIL')`) stamped on every tagged entry. [Section ›](#compliance-routing--retention-as-data)
-- **DurableFileTransport** — audit delivery that survives backend outages AND process restarts, via a self-emptying disk spool. [Section ›](#durable-delivery--durablefiletransport)
-- **Masking hardened, in BOTH engines (Python + Rust)** — non-string values and nested objects under a sensitive key are now masked (`password=12345` and `password={'hash': ...}` no longer leak); bare `credit_card`/`ssn`/`phone` field names are now covered; lists are no longer corrupted by the masking pass; `MASK_KEYS` aliases + `mask_pattern()`; `on_masking_error` hook; on failure the entry degrades to a safe payload — raw metadata never leaks.
-- **Safety boundary** — ANSI/control characters stripped from every string before transports (log-injection defense); `on_log_failure` hook; `slpy.get_stats()` health counters.
-- **Testing toolkit** — `slpy.testing.SpyTransport` for asserting on emitted (and masked) entries.
-- **Timestamps are now ISO-8601** with milliseconds and offset (was epoch-ms) — the same format as SyntropyLog and sl4n.
+- **Faster — masking in the Python engine is 3.3x faster (5,576 → 1,697 ns/op).** Field *names* repeat across log entries while values change, yet every key was re-scanned against every rule regex on every log. The engine now caches the *decision* per key name (bounded, cap 4096, invalidated on `add_rule`) — never the value. Masked output is byte-for-byte identical, nested keys included. A family fix: found by the Java port's JMH suite, applied to SyntropyLog (JS) and slpy the same day.
+- **Hardened — explosive custom key patterns are rejected at rule construction.** CPython's `re` cannot be interrupted mid-match, and the 256-char key cap alone does not bound a nested quantifier (measured: `(a+)+$` hangs at 40 chars). `MaskingRule` now fails fast with a clear error on such patterns; safe patterns and default rules are unaffected. The Rust engine (linear-time `regex` crate) was already immune by construction.
 
 Details: [CHANGELOG.md](CHANGELOG.md).
 

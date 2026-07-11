@@ -4,6 +4,37 @@ All notable changes to slpy are documented here.
 
 ---
 
+## [Unreleased]
+
+### Performance
+
+- **Masking is 3.3x faster in the Python engine (5,576 → 1,697 ns/op) via a bounded
+  per-key-name decision cache.** Field names repeat across log entries while values change,
+  yet `_find_rule` re-scanned every rule regex per key on every log. The engine now caches
+  the *decision* (truncated key name → rule-or-none), never the value. Safety properties:
+  bounded at 4096 entries (hostile payloads generating unique key names cannot grow memory —
+  past the cap, new keys still mask correctly, uncached); invalidated on `add_rule()` (a name
+  cached as "no rule" is re-evaluated); deterministic by construction (keyed on the same
+  truncated name the scan matches against); covers nested keys (the walk consults it at every
+  depth). Masked output is byte-for-byte identical — shared parity fixture still green.
+  `MaskingEngine.decision_cache_size` exposes it. The Rust engine is unaffected (it has its
+  own hot path); this speeds up the always-available Python fallback and custom-callable mode.
+  Family fix: found by the Java port's JMH suite (4,497→1,187 ns/op there), applied to
+  SyntropyLog (JS, 442→183 ns/op) and slpy the same day.
+
+### Security
+
+- **ReDoS: explosive custom key patterns are rejected at rule construction** (shipped in
+  `61b4dcc`, documented here). CPython's `re` has no timeout API and the 256-char key cap does
+  NOT bound a nested quantifier — measured: `(a+)+$` hangs at 40 chars. `MaskingRule` now runs
+  a static star-height check (`slpy/_regex_safety.py`, mirror of SyntropyLog's
+  `regexSafety.ts`) and fails fast on nested unbounded quantifiers and counted repetition of
+  unbounded bodies. Default rules and safe custom patterns are unaffected. Residual, pinned by
+  test: overlapping alternation (`(a|a)*`) is not statically detectable; slpy-native (Rust
+  `regex` crate, linear-time) remains immune by construction.
+
+---
+
 ## [1.0.0] — 2026-07-09
 
 **First stable release.** 0.4.0 brought slpy to conceptual parity with its siblings —

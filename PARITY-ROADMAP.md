@@ -78,10 +78,12 @@ something Python has done well for many years, not by building new machinery.
 in every port — sl4n's roadmap lists the same three. Whoever closes them first should leave the
 pattern for the others.
 
-- [ ] **Perf: per-field-name decision cache in masking** (family finding, 2026-07-11, from the
-      Java port's JMH suite): every field is scanned against all default rules per log, and the
-      catch-all alternation runs on every non-sensitive field. Java fixed it with a BOUNDED
-      decision cache (field name → rule-or-none, cap 4096 so hostile key floods can't grow
-      memory; ReDoS/transient failures never cached) — 4,497→1,187 ns/op. slpy shares the same
-      scan structure in `_find_rule`; same fix applies (a plain dict + cap; also mirrors to the
-      Rust twin if profiling warrants). Mind: slpy masks nested keys — cache on the leaf key name.
+- [x] **Perf: per-field-name decision cache in masking** — DONE 2026-07-11, same day as the
+      finding (family fix, from the Java port's JMH suite). Bounded dict (truncated key name →
+      rule-or-none, cap 4096 so hostile key floods can't grow memory; invalidated on `add_rule`;
+      nested keys covered because the walk consults it at every depth) passed as an explicit
+      parameter through the pure `_mask_tree`/`_find_rule` functions — no module state.
+      Measured: **5,576 → 1,697 ns/op (3.3x)** on the Python path, 188 tests green, masked
+      output byte-for-byte identical. The whole family now has it: Java 4,497→1,187 (JMH),
+      JS 442→183, Python 5,576→1,697. The Rust twin keeps its own hot path — profile before
+      mirroring anything there.
