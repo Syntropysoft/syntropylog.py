@@ -77,3 +77,11 @@ something Python has done well for many years, not by building new machinery.
 **Family-wide note:** the "JS-only trio" (traceparent, OTel export, full hot reconfig) is missing
 in every port — sl4n's roadmap lists the same three. Whoever closes them first should leave the
 pattern for the others.
+
+- [ ] **Perf: per-field-name decision cache in masking** (family finding, 2026-07-11, from the
+      Java port's JMH suite): every field is scanned against all default rules per log, and the
+      catch-all alternation runs on every non-sensitive field. Java fixed it with a BOUNDED
+      decision cache (field name → rule-or-none, cap 4096 so hostile key floods can't grow
+      memory; ReDoS/transient failures never cached) — 4,497→1,187 ns/op. slpy shares the same
+      scan structure in `_find_rule`; same fix applies (a plain dict + cap; also mirrors to the
+      Rust twin if profiling warrants). Mind: slpy masks nested keys — cache on the leaf key name.
