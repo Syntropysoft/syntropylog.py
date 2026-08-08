@@ -29,6 +29,25 @@ the remaining gaps vs the JS reference, so findings live in a roadmap like every
 - **Safety** — `on_log_failure`, `on_masking_error` (never-throw, counted), `get_stats()`,
   durable spool transport, `AdapterTransport` fallback-to-console, `SpyTransport` testing kit.
 
+## Backport analysis — SyntropyLog 1.4.1 / 1.4.2 (native + masking fixes)
+
+Four fixes that shipped in SyntropyLog (JS) 1.4.1/1.4.2 were analysed against slpy (2026-08-08).
+**All four are N/A.** slpy *does* have a Rust addon (`slpy_native`), but it does a **different job**
+than the JS one — it **masks and returns an object** (`NativeMaskingEngine.process()` → dict/list); it
+does not serialize to a string — so it sidesteps the native-serialization bug classes entirely.
+
+| SyntropyLog (JS) fix | slpy | Why |
+| :-- | :-- | :-- |
+| **UTF-8 panic** in the native `truncate` (byte-index slice split a multi-byte char → `SIGABRT`) | N/A | No `truncate`/`max_string_length` in `slpy-native`. The only byte slices are `&value[..at]` with `at = value.find('@')` (always a char boundary) and ASCII-digit slices. No panic possible. |
+| **Masking mutated the caller's object** | N/A | Both engines build new structures: Rust `mask_tree` → `PyDict::new(py)`; Python `_mask_tree` → dict/list comprehensions. Functional and non-mutating; depth-bounded, so a cyclic input can't hang. |
+| **Cross-tenant PII leak** from a process-global native config (`OnceCell`) | N/A | `NativeMaskingEngine` is per-instance (`#[new]` holds its own `rules`); there is no global `OnceCell` config to share across instances. |
+| **Native path fed a serialized string to object-consuming transports** | N/A | The Rust engine returns an **object** (masked dict), and the pipeline is object-based: `logger.py` calls `transport.log(entry)` with `entry: Dict`, and each transport serializes itself (`json.dumps` in `ConsoleTransport`). No string fast-path to break. |
+
+The JS #4 bug existed *because* the JS native engine serializes to a string (a perf optimisation) that
+then leaked into object-consuming transports. slpy's Rust masks→object and each transport serializes
+itself, so slpy never had that optimisation — nor the bug. The JS fix brings JS up to what slpy (and
+sl4n) already do.
+
 ## Security hardening (2026-07-10, family-wide ReDoS audit)
 
 Measured finding: the 256-char key cap did NOT bound nested-quantifier patterns — `(a+)+$`
