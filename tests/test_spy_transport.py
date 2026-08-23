@@ -53,4 +53,4 @@ async def test_spy_sees_masked_output(fresh_slpy):
         "masking": {"enable_default_rules": True},
     })
     fresh_slpy.get_logger("svc").info("login", password="hunter2")
-    assert spy.first_entry["password"] == "*******"
+    assert spy.first_entry["password"] == "[REDACTED]"

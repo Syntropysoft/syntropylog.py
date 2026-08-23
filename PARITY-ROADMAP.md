@@ -162,11 +162,20 @@ something Python has done well for many years, not by building new machinery.
       run the same gate locally; every path was verified to fail on a broken tree, not just to
       pass on a clean one. Note: enabling `core.hooksPath` overrides a *global* hooks path, so the
       refuse-on-`main` guard is replicated inside the repo's own hook.
-- [ ] **Canonical masking (breaking)** — adopt `MaskSpec` + `apply_mask` in both engines, copy
-      `mask-parity-cases.json` byte-identical into `tests/`, assert it against Python and Rust.
-      Keep the existing 13 cases for the tree walk (nesting, lists, depth budget) — the shared
-      fixture only covers the scalar primitive. Migration note required: the emitted masked value
-      changes for all five built-in strategies.
+- [x] **Canonical masking (breaking)** — DONE 2026-08-23. `MaskSpec` + `apply_mask` in both
+      engines, transliterated from the family pair rather than re-derived: the Rust core from
+      SyntropyLog's addon (the spec block is binding-free, so it dropped into the pyo3 crate
+      without serde) and the Python side from `maskSpec.ts`. `mask-parity-cases.json` copied byte
+      identical (md5 `8eec8a82008d52b22be29e4aebb031d4`) and asserted three ways: the pure
+      primitive, the Python engine, and the Rust engine — 17 cases each. The 13 tree-walk cases
+      stayed, with canonical expectations.
+      **Two things fell out of doing it properly.** The Rust engine no longer owns a rule table or
+      knows what a strategy is: Python resolves every strategy to a spec and pushes every rule,
+      defaults included, so there is one rule list and one mapping in the project and neither can
+      drift. And the boundary is versioned — `ENGINE_API`, checked at import — so an addon from an
+      older wheel makes slpy fall back to the Python engine instead of silently masking by other
+      rules. `preserve_length` went from dead config to live. 252 tests green, 0 skipped;
+      209 green on CPython 3.7.
 - [ ] **Retention to JS 2.1.0** — `months`/`years` on `RetentionPolicy`; a pure
       `retention_window` module (roll forward on a short month, `date.replace()` raises on 31-Feb
       so it must be explicit); `retention_until` stamped **in `_emit`** from the entry timestamp,

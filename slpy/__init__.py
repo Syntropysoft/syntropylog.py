@@ -25,7 +25,9 @@ Quick start:
 from .core import SyntropyLog
 from .durable import DurableFileTransport
 from .transport import Transport, ConsoleTransport, PrettyConsoleTransport, UniversalAdapter, AdapterTransport
-from .masking import MASK_KEYS, MaskingEngine, MaskingRule, MaskingStrategy, mask_pattern
+from .masking import (MASK_KEYS, MaskingEngine, MaskingRule, MaskingStrategy,
+                      mask_pattern, strategy_to_spec)
+from .mask_spec import REDACTED, MaskSpec, apply_mask
 from .matrix import LoggingMatrix
 from .retention import RetentionPolicy, RetentionRegistry
 from .stats import StatsSnapshot
@@ -49,6 +51,10 @@ __all__ = [
     "MaskingStrategy",
     "MASK_KEYS",
     "mask_pattern",
+    "MaskSpec",
+    "apply_mask",
+    "strategy_to_spec",
+    "REDACTED",
     "LoggingMatrix",
     "StatsSnapshot",
     "RetentionPolicy",

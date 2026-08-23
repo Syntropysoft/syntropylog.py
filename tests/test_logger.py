@@ -148,7 +148,7 @@ def test_logger_masks_sensitive_kwargs(logger, transport):
     logger.info("Login", email="john@example.com", password="secret123")
     entry = transport.last()
     assert "john@example.com" not in entry["email"]
-    assert entry["password"] == "*" * len("secret123")
+    assert entry["password"] == "[REDACTED]"
 
 
 # ------------------------------------------------------------------

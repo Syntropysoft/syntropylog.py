@@ -59,7 +59,7 @@ asyncio.run(main())
 What lands on the console (structured JSON — this is the real output):
 
 ```json
-{"level":"info","message":"Card charged","timestamp":"2026-07-09T15:14:14.929+00:00","service":"payments","request_id":"req-001","email":"j**n@example.com","password":"*******","amount":299.9}
+{"level":"info","message":"Card charged","timestamp":"2026-07-09T15:14:14.929+00:00","service":"payments","request_id":"req-001","email":"j***@example.com","password":"[REDACTED]","amount":299.9}
 ```
 
 The `request_id` propagated automatically. The `email` and `password` were masked automatically. The `service` field appeared automatically. You wrote none of that explicitly — and this is the **default behavior**, not magic. From here everything is configurable: masking rules, which context fields each level emits, where logs go, retention. The sections below are how.
@@ -253,23 +253,46 @@ logger.info('Payment', card_number='4111-1111-1111-1234', amount=299.90)
 # → card_number: "************1234"   amount: 299.9 (numbers untouched)
 
 logger.info('Order', order={'user': {'token': 'abc123', 'id': 'USR-1'}})
-# → order.user.token: "******"   order.user.id: "USR-1" (not a sensitive key)
+# → order.user.token: "[REDACTED]"   order.user.id: "USR-1" (not a sensitive key)
 
 # Non-strings and nested structures under a sensitive key are masked too:
-logger.info('Login', password=12345)             # → password: "*****"
-logger.info('Auth', password={'hash': 'abc'})    # → password.hash: "***"
+logger.info('Login', password=12345)             # → password: "[REDACTED]"
+logger.info('Auth', password={'hash': 'abc'})    # → password.hash: "[REDACTED]"
 ```
 
 **Identifiers keep their last digits (debuggable); credentials are fully redacted.** Real outputs from the default rules:
 
-| Field key (examples) | Result |
-|---|---|
-| `email`, `mail` | `j**n@example.com` |
-| `password`, `pass`, `pwd`, `secret` | `*******` (full mask) |
-| `token`, `key`, `auth`, `jwt`, `bearer`, `api_key` | `******` (full mask) |
-| `credit_card`, `card_number`, `creditCardNumber` | `************1234` |
-| `ssn`, `social_security`, `ssn_number` | `*****6789` |
-| `phone`, `mobile`, `tel`, `phone_number` | `*******4567` |
+| Field key (examples) | Input | Result |
+|---|---|---|
+| `email`, `mail` | `john@example.com` | `j***@example.com` |
+| `password`, `pass`, `pwd`, `secret` | `hunter2` | `[REDACTED]` |
+| `token`, `key`, `auth`, `jwt`, `bearer`, `api_key` | `abc123xyz` | `[REDACTED]` |
+| `credit_card`, `card_number`, `creditCardNumber` | `4111-1111-1111-1234` | `****-****-****-1234` |
+| `ssn`, `social_security`, `ssn_number` | `123-45-6789` | `***-**-6789` |
+| `phone`, `mobile`, `tel`, `phone_number` | `+1 (555) 123-4567` | `+* (***) ***-4567` |
+
+Identifiers keep their separators: the format is what makes a masked value readable in a log, and
+the last four digits are not the secret. Credentials get no partial and no length — a
+length-preserving password mask publishes how long the password is, so `mask_char` is ignored for
+`password` and `token`.
+
+Every one of these comes from a `MaskSpec`, and the mapping from strategy to spec is
+`strategy_to_spec()`. The masking primitive is shared across the whole family: slpy asserts the
+same `mask-parity-cases.json` fixture as SyntropyLog (Node), its Rust addon and the JVM port, so a
+card masked here reads exactly like a card masked there. Write your own as data:
+
+```python
+from slpy import MaskSpec, MaskingRule, MaskingStrategy
+
+MaskingRule(
+    pattern=r'^cuit$',
+    strategy=MaskingStrategy.CUSTOM,
+    spec=MaskSpec(scope='digits', unmask_end=1),   # 20-12345678-9 → **-********-9
+)
+```
+
+A `spec` crosses into the Rust engine as data. A `custom_mask` callable cannot, and keeps that
+rule on the Python engine.
 
 The default rules are deliberately **greedy** — a field name that *contains* a sensitive word is masked (`user_password`, `sessionKey`). Better to over-mask than to leak. For precise custom rules, build anchored patterns from the grouped aliases (no string literals — keeps secret scanners like Sonar quiet):
 

@@ -5,12 +5,14 @@
 > It documents a facade that does not exist (`syntropy_log.add_masking_rule`, `mask_data`,
 > `get_masking_stats`, module-level `syntropy_log.info`), a flatten/unflatten architecture the
 > engine does not use (masking is a depth-bounded recursive walk — `_mask_tree` in
-> `slpy/masking.py`), and masked values the engine does not produce (a card comes out
-> `************1234`, not `****-****-****-1234`; a password `*******`, not `********`).
+> `slpy/masking.py`), and outputs that are only half right: the card and SSN examples happen to
+> match what slpy emits since it adopted the family's `MaskSpec`, while `j***e@example.com` never
+> did (it is `j***@example.com`) and a password is `[REDACTED]`, not a run of asterisks. The
+> `preserve_length=True` / `False` pairs showing identical output documented a flag that was dead
+> config at the time; it is live now and the two differ.
 >
-> Accurate today: `README.md` (§ Masking) and `slpy/masking.py`. Rewrite tracked in
-> `PARITY-ROADMAP.md` — note that the masking semantics themselves change when slpy adopts the
-> family's shared `MaskSpec` fixture, so this is being rewritten once, after that lands.
+> Accurate today: `README.md` (§ Masking), `slpy/mask_spec.py` and `tests/mask-parity-cases.json`.
+> Rewrite tracked in `PARITY-ROADMAP.md`.
 
 
 ## 🎯 Overview

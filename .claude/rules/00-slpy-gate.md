@@ -62,19 +62,38 @@ replicado dentro del hook del repo y no se asume de afuera.
 - ❌ NEVER que un fallo de logging escape al caller.
 - ❌ NEVER romper `>=3.7`: es el piso declarado y es viejo a propósito.
 - ✅ ALWAYS mantener `py.typed` (declarado en `package-data`) — el paquete promete tipos.
+- ❌ NEVER mezclar cálculo y efecto cuando se pueden separar. ✅ ALWAYS la **decisión** en una
+  función pura a nivel módulo (`apply_mask`, `strategy_to_spec`, `_mask_tree`, `RetentionRegistry.stamp`)
+  y el **efecto** — escribir al transport, tocar un contador — en el borde que la llama. Guard
+  clauses primero: el fail-path sale arriba, sin `else`. SOLID sobre `Transport`: se extiende
+  agregando un sink, no tocando el logger; y una estrategia de masking nueva es **un spec**, no una
+  función en dos lenguajes.
+  **El límite, explícito:** el estado mutable que queda es deliberado y chico — la caché de
+  decisiones del masking, que se pasa como **parámetro explícito** a las funciones puras en vez de
+  vivir en el módulo, y los contadores de `SlpyStats`. La regla no es "nada muta": es que lo que se
+  *calcula* salga de funciones puras, y lo que *muta* sea un borde nombrado y justificado.
 
 ## Gotchas conocidos
 
-**El masking de slpy NO es canónico** (hasta que aterrice 2.0.0). El motor es tabla de estrategias,
-no `MaskSpec`, y la salida difiere de JS/Rust/JVM en las cinco estrategias built-in: email
-`j**n@` vs `j***@`, tarjeta `************1234` vs `****-****-****-1234`, password `*******` vs
-`[REDACTED]`. El fixture compartido `mask-parity-cases.json` **no existe en este repo**. ❌ NEVER
-afirmar paridad de masking citando el roadmap viejo: lo afirmaba y era falso. Estado real y
-decisión en `PARITY-ROADMAP.md` § *Audit 2026-08-23*.
+**El masking es canónico desde 2026-08-23 y hay UNA sola fuente de cada cosa.** El mapeo
+estrategia→spec vive en `strategy_to_spec()` (`slpy/masking.py`) y en ningún otro lado; el motor
+Rust **no sabe qué es una estrategia** y tampoco tiene tabla de reglas propia — Python le empuja
+todas, defaults incluidos, ya resueltas a `MaskSpec`. ❌ NEVER agregar una estrategia tocando los
+dos lenguajes: es un spec nuevo y nada más. El contrato lo fija `tests/mask-parity-cases.json`,
+copia byte a byte de la familia — ❌ NEVER editarlo acá: se edita en la familia y se copia.
 
-**`preserve_length` es config muerta** en los dos motores: se acepta en `core.py`, se guarda en
-`masking.py` y no la lee nadie (`slpy-native/src/lib.rs`: `let _ = preserve_length;`). Cobra
-sentido recién con el spec canónico.
+**El borde con el addon está versionado.** `ENGINE_API` (hoy `2`) tiene que coincidir con
+`_REQUIRED_ENGINE_API` en `slpy/masking.py`; si no, slpy cae al motor Python en vez de correr uno
+cuyas semánticas no puede garantizar. Cambió la forma del borde → se bumpea el número.
+
+**Trampa de la transliteración:** `str.isdigit()` NO es `is_ascii_digit()` (`'²'`, `'٣'` son
+digit). `_is_ascii_digit` en `slpy/mask_spec.py` es explícito por eso, y los 17 casos del fixture
+son todos ASCII, así que **el fixture no atrapa esta deriva** — la atrapa
+`test_non_ascii_digits_do_not_diverge`.
+
+**`preserve_length` dejó de ser config muerta** (2026-08-23): la interpreta `apply_mask` y capa el
+tramo enmascarado en `MASK_DEFAULT_CAP_LENGTH = 8`. No aplica a `password`/`token`, que redactan
+entero — y ahí `mask_char` **también** se ignora, a propósito.
 
 **`docs/` describe una librería que no existe.** `data_masking.md`, `lifecycle.md` y
 `logger_matrix.md` son anteriores al refactor y documentan 11 métodos de fachada que nunca se

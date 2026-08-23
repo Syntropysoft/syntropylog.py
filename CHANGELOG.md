@@ -6,6 +6,72 @@ All notable changes to slpy are documented here.
 
 ## [Unreleased]
 
+### Changed (breaking) — masked values now match the rest of the family
+
+**What a masked value looks like changes for all five built-in strategies.** slpy's masking was
+never canonical: the family expresses a strategy as a `MaskSpec` — data both engines interpret —
+and asserts a shared 17-case fixture from every port. slpy had neither. It had six hand-written
+masker functions in Python, six more in Rust, and thirteen expectations of its own.
+
+| input | before | now |
+| :-- | :-- | :-- |
+| `john@example.com` | `j**n@example.com` | `j***@example.com` |
+| `4111-1111-1111-1234` | `************1234` | `****-****-****-1234` |
+| `123-45-6789` | `*****6789` | `***-**-6789` |
+| `+1 (555) 123-4567` | `*******4567` | `+* (***) ***-4567` |
+| `hunter2` under `password`/`token` | `*******` | `[REDACTED]` |
+
+Two of those are security, not cosmetics. A credential is now redacted whole because a
+length-preserving mask **publishes the length of the secret** — `*******` says the password has
+seven characters, `[REDACTED]` says nothing — and for the same reason `mask_char` is now ignored
+for `password` and `token`. And slpy's email mask used to keep the **last** character of the local
+part as well as the first, revealing one character more than every sibling. Identifiers still keep
+their last four digits and now keep their separators too: the format is what makes a masked value
+readable in a log, and the last four of a card are not the secret.
+
+**Migration.** If you assert on masked output — a snapshot test, a log-parsing rule, a dashboard
+regex — the values above are what changes. Nothing else does: the API is the same, the rules match
+the same field names, and an entry that was masked before is masked now. If you had set
+`mask_char` on a `password` or `token` rule, it no longer has an effect; use `MaskingStrategy.CUSTOM`
+if you want a full mask with your own character.
+
+### Added — a masking strategy is data, and it crosses to Rust as data
+
+- **`MaskSpec`, `apply_mask()` and `strategy_to_spec()` are public.** A `MaskSpec` says how to mask
+  a string — `redact`, `unmask_start`, `unmask_end`, `scope`, `keep_after`, `mask_char`,
+  `preserve_length` — and a `MaskingRule` now takes one directly via `spec=`, which **overrides the
+  strategy and still crosses into the Rust engine**. Previously the only way to write a custom mask
+  was a `custom_mask` callable, which cannot cross and quietly forced the whole logger onto the
+  Python engine. Both slpy engines are transliterations of the canonical pair that already exists
+  in the family, so the shared `tests/mask-parity-cases.json` — byte-identical to the copies in
+  SyntropyLog and syntropylog-java — is asserted three ways here: against the pure primitive,
+  against the Python engine, and against the Rust engine.
+
+- **`preserve_length` does something.** It was accepted in config, stored on the rule, and read by
+  neither engine — `slpy-native` was at least honest about it (`let _ = preserve_length;`). It now
+  caps the masked run at 8 characters so the output does not publish the original length.
+
+### Changed — internal
+
+- **The Rust engine stopped owning a rule table, and stopped knowing what a strategy is.** It used
+  to carry its own copy of the six default patterns and its own strategy→mask functions, kept in
+  lockstep with Python's by comment. Python now resolves every strategy into a spec and pushes
+  every rule across, defaults included; Rust only interprets specs. One rule list, one mapping, in
+  one language — the two engines can no longer disagree about which rules exist, in what order they
+  match, or what a strategy means. Note that the shared fixture would **not** have caught a drift
+  in that mapping: it pins `apply_mask`, not the strategy presets.
+
+- **The addon boundary is versioned.** `slpy_native.ENGINE_API` must match what `slpy/masking.py`
+  requires; on a mismatch — an addon built from an older wheel — slpy falls back to the Python
+  engine instead of running an engine whose semantics it cannot vouch for. The old code would have
+  called a changed API, caught the `TypeError`, and carried on.
+
+- **A transliteration trap, pinned by its own test.** Python's `str.isdigit()` is true for `'²'`
+  and `'٣'`; Rust's `is_ascii_digit()` is not. Writing `mask_digits` with the builtin would pass
+  all 17 fixture cases — every one of them is ASCII — and still disagree with the Rust engine on
+  any non-ASCII digit. `_is_ascii_digit` is explicit, and
+  `test_non_ascii_digits_do_not_diverge` covers what the fixture cannot.
+
 ### Added — internal
 
 - **The gate runs on every push, and the engine-drift lock finally runs at all.** There was no CI
