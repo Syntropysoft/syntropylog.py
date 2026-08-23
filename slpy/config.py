@@ -41,6 +41,9 @@ class MaskingConfig:
     max_depth: int = 10
     # Called when masking fails (never receives the raw payload). Never raises.
     on_masking_error: Optional[Any] = None
+    # Transports that receive the entry UNMASKED, by name. Declared here, in app
+    # config — never by a transport about itself. An unknown name fails at init().
+    exempt_transports: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -51,7 +54,9 @@ class Config:
     observability: ObservabilityConfig = field(default_factory=ObservabilityConfig)
     # Per-level whitelist of context fields: {'default': [...], 'info': [...], 'error': ['*']}
     logging_matrix: Dict[str, List[str]] = field(default_factory=dict)
-    # Named retention policies: {'SOX_AUDIT_TRAIL': {'days': 2555, 'class': 'SOX'}}
+    # Named retention policies: {'SOX_AUDIT_TRAIL': {'years': 7, 'class': 'SOX'}}
+    # Exactly one unit per policy — days | months | years. Prefer the calendar
+    # unit: 2555 days is 7 x 365 and ends two days before seven actual years.
     retention_policies: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -80,6 +85,7 @@ class ConfigManager:
                 rules=masking_raw.get("rules", []),
                 max_depth=masking_raw.get("max_depth", 10),
                 on_masking_error=masking_raw.get("on_masking_error"),
+                exempt_transports=masking_raw.get("exempt_transports", []),
             ),
             observability=ObservabilityConfig(
                 transports=obs_raw.get("transports", []),

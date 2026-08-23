@@ -59,7 +59,7 @@ asyncio.run(main())
 What lands on the console (structured JSON — this is the real output):
 
 ```json
-{"level":"info","message":"Card charged","timestamp":"2026-07-09T15:14:14.929+00:00","service":"payments","request_id":"req-001","email":"j**n@example.com","password":"*******","amount":299.9}
+{"level":"info","message":"Card charged","timestamp":"2026-07-09T15:14:14.929+00:00","service":"payments","request_id":"req-001","email":"j***@example.com","password":"[REDACTED]","amount":299.9}
 ```
 
 The `request_id` propagated automatically. The `email` and `password` were masked automatically. The `service` field appeared automatically. You wrote none of that explicitly — and this is the **default behavior**, not magic. From here everything is configurable: masking rules, which context fields each level emits, where logs go, retention. The sections below are how.
@@ -253,23 +253,46 @@ logger.info('Payment', card_number='4111-1111-1111-1234', amount=299.90)
 # → card_number: "************1234"   amount: 299.9 (numbers untouched)
 
 logger.info('Order', order={'user': {'token': 'abc123', 'id': 'USR-1'}})
-# → order.user.token: "******"   order.user.id: "USR-1" (not a sensitive key)
+# → order.user.token: "[REDACTED]"   order.user.id: "USR-1" (not a sensitive key)
 
 # Non-strings and nested structures under a sensitive key are masked too:
-logger.info('Login', password=12345)             # → password: "*****"
-logger.info('Auth', password={'hash': 'abc'})    # → password.hash: "***"
+logger.info('Login', password=12345)             # → password: "[REDACTED]"
+logger.info('Auth', password={'hash': 'abc'})    # → password.hash: "[REDACTED]"
 ```
 
 **Identifiers keep their last digits (debuggable); credentials are fully redacted.** Real outputs from the default rules:
 
-| Field key (examples) | Result |
-|---|---|
-| `email`, `mail` | `j**n@example.com` |
-| `password`, `pass`, `pwd`, `secret` | `*******` (full mask) |
-| `token`, `key`, `auth`, `jwt`, `bearer`, `api_key` | `******` (full mask) |
-| `credit_card`, `card_number`, `creditCardNumber` | `************1234` |
-| `ssn`, `social_security`, `ssn_number` | `*****6789` |
-| `phone`, `mobile`, `tel`, `phone_number` | `*******4567` |
+| Field key (examples) | Input | Result |
+|---|---|---|
+| `email`, `mail` | `john@example.com` | `j***@example.com` |
+| `password`, `pass`, `pwd`, `secret` | `hunter2` | `[REDACTED]` |
+| `token`, `key`, `auth`, `jwt`, `bearer`, `api_key` | `abc123xyz` | `[REDACTED]` |
+| `credit_card`, `card_number`, `creditCardNumber` | `4111-1111-1111-1234` | `****-****-****-1234` |
+| `ssn`, `social_security`, `ssn_number` | `123-45-6789` | `***-**-6789` |
+| `phone`, `mobile`, `tel`, `phone_number` | `+1 (555) 123-4567` | `+* (***) ***-4567` |
+
+Identifiers keep their separators: the format is what makes a masked value readable in a log, and
+the last four digits are not the secret. Credentials get no partial and no length — a
+length-preserving password mask publishes how long the password is, so `mask_char` is ignored for
+`password` and `token`.
+
+Every one of these comes from a `MaskSpec`, and the mapping from strategy to spec is
+`strategy_to_spec()`. The masking primitive is shared across the whole family: slpy asserts the
+same `mask-parity-cases.json` fixture as SyntropyLog (Node), its Rust addon and the JVM port, so a
+card masked here reads exactly like a card masked there. Write your own as data:
+
+```python
+from slpy import MaskSpec, MaskingRule, MaskingStrategy
+
+MaskingRule(
+    pattern=r'^cuit$',
+    strategy=MaskingStrategy.CUSTOM,
+    spec=MaskSpec(scope='digits', unmask_end=1),   # 20-12345678-9 → **-********-9
+)
+```
+
+A `spec` crosses into the Rust engine as data. A `custom_mask` callable cannot, and keeps that
+rule on the Python engine.
 
 The default rules are deliberately **greedy** — a field name that *contains* a sensitive word is masked (`user_password`, `sessionKey`). Better to over-mask than to leak. For precise custom rules, build anchored patterns from the grouped aliases (no string literals — keeps secret scanners like Sonar quiet):
 
@@ -283,6 +306,33 @@ from slpy import MASK_KEYS, mask_pattern
 }
 ```
 
+**One sink can be exempt: the audit ledger.** Masking runs once, before the transport loop, so
+every sink gets the same redacted entry — right for consoles and APMs, wrong for the compliance
+ledger, where `j***@example.com` proves nothing.
+
+```python
+audit = AdapterTransport(name='audit-journal', adapter=UniversalAdapter(executor=to_ledger))
+
+await slpy.init({
+    'logger':  {'transports': [ConsoleTransport(), audit]},
+    'masking': {'exempt_transports': ['audit-journal']},
+})
+# console      → email: "j***@example.com"
+# audit-journal → email: "john@example.com"
+```
+
+A transport is addressed by its `name`, or by its class name when it has none. The exemption is
+**declared in app config, never by a transport about itself** — the check lives in the logger,
+where the sink's identity is known. An unknown name raises `UnknownExemptTransportError` at
+`init()`: exempting a transport removes masking from it, so a typo would leave the audit sink
+masked, silently, exactly where the truth was required. Forgetting the key masks the sink, which
+errs safe.
+
+It skips masking and **nothing else**. The Logging Matrix already decided which context fields
+exist, and the sanitizer still runs — a forged log line is a forged log line whether or not the
+values are masked. Both are pinned by test. Cost when unused is zero: the second entry is built
+only if a sink is declared exempt.
+
 **Failsafe.** Masking never throws. If it fails, the failure is counted (`get_stats().masking_failures`), reported through the optional `masking.on_masking_error` hook (which never receives the raw payload), and the entry degrades to a safe payload — `level`/`timestamp`/`message`/`service` plus `_masking_failed: True`. **The raw metadata never leaks.** Rules only ever run against field names (capped at 256 chars), never values — bounded input, bounded regex evaluation.
 
 ---
@@ -294,20 +344,63 @@ Declare named policies once; tag loggers with `with_retention(name)`; every tagg
 ```python
 await slpy.init({
     'retention_policies': {
-        'SOX_AUDIT_TRAIL': {'days': 2555, 'class': 'SOX'},   # 7 years
-        'GDPR_ACCESS':     {'days': 90,   'class': 'GDPR'},
+        'SOX_AUDIT_TRAIL': {'years': 7,  'class': 'SOX'},
+        'BCRA_A7724':      {'months': 42, 'class': 'BCRA'},
+        'GDPR_ACCESS':     {'days': 90,  'class': 'GDPR'},
     },
 })
 
 audit = slpy.get_logger('payments').with_retention('SOX_AUDIT_TRAIL')
 audit.audit('Manager override', user_id='u-1')
-# → retention: "SOX_AUDIT_TRAIL"  retention_class: "SOX"  retention_days: 2555
+# → retention: "SOX_AUDIT_TRAIL"  retention_class: "SOX"  retention_until: "2033-08-23"
 ```
 
+**`retention_until` is the point.** The date the mandatory window ends, materialized when the entry
+is written, so a sweep is an indexable range scan — `WHERE retention_until < CURRENT_DATE` — instead
+of a policy interpretation. It also means a record filed under an older revision of a policy keeps
+the window that was in force when it was written. It is **not** an expiry: reaching it ends the
+obligation, it does not authorize deletion.
+
+**Declare exactly one unit,** and prefer the calendar one. `days` is exact but drifts: `2555` is
+7 × 365, misses two leap days, and ends the window two days before seven actual years. A policy
+declaring more than one unit **refuses to start** — an ambiguous compliance window has no safe
+default, and a host that will not boot beats records swept on a date nobody chose.
+
+**The rounding errs long, never short.** 31-Jan plus one month has no 31-Feb to land on, so it rolls
+forward to 3-Mar rather than clamping back to 28-Feb; 29-Feb plus a year lands on 1-Mar. Ending a
+window early is the failure an auditor punishes; a record kept a day too long costs storage.
+
 - The stamped fields are **never filtered by the Logging Matrix** — they are bindings, not context.
-- An unregistered name still stamps `retention` — compliance intent is never silently dropped.
-- Inline policies work without a registry entry: `with_retention({'days': 30, 'class': 'PCI'})`.
+  `retention_until` is written per entry, after your kwargs: a caller cannot hand-write the date a
+  compliance sweep will read.
+- **An unregistered name raises** `RetentionPolicyNotFoundError`, with the registered names listed.
+  It raises from `with_retention()` — where you build the logger, once — never from a log call:
+  logging still cannot throw. A typo that travelled silently would be a record with no retention at
+  all, found at audit time.
+- Lookup is case-insensitive, but the field always carries the **registered spelling**. Downstream
+  matches an exact string, so one policy must not arrive as `SOX_AUDIT` on some records and
+  `sox_audit` on others.
+- Inline policies work without a registry entry: `with_retention({'months': 6, 'class': 'PCI'})`.
+  They have no name to route on, so nothing lands in `retention` — the window is still computed.
 - Composes with the rest of the fluent API: `logger.child(...).with_retention(...).with_meta(...)`.
+
+**Resolving outside the logger** — for a domain write path that persists retention in its own
+column, and needs the same answer the log gets:
+
+```python
+registry = slpy._retention                       # or build your own RetentionRegistry
+registry.policies                                # every policy, frozen, by canonical name
+registry.resolve('SOX_AUDIT_TRAIL')              # the policy, or None
+registry.require('SOX_AUDIT_TRAIL')              # the policy, or RetentionPolicyNotFoundError
+registry.until('SOX_AUDIT_TRAIL', written_at)    # the same date the logger stamps
+
+from slpy import retention_until                 # the pure function underneath
+retention_until(date(2026, 1, 31), RetentionPolicy(months=1))   # → date(2026, 3, 3)
+```
+
+The registry is frozen: it copies on construction and hands out a read-only view, so neither the
+dict you passed in nor the view you get back can redefine a window for records already written
+under the old one.
 
 Pair it with `DurableFileTransport` (below) so tagged entries are also *delivered* with guarantees.
 
@@ -485,6 +578,14 @@ It is the component that makes every log line correct, consistent, and safe befo
 - **Log-injection boundary** built in (ANSI/control-char stripping).
 - **Masking failsafe** — a masking failure yields a safe payload, never the raw metadata.
 - `custom_mask` functions in masking rules are consumer-supplied configuration, not influenced by external input.
+- **Both dependency trees are audited on every push and pull request** — `pip-audit` over the
+  third-party Python set and `cargo audit` over `slpy-native/Cargo.lock`, which is where the real
+  surface is: the core ships zero runtime dependencies, and the addon pulls pyo3 and regex.
+  Dependabot files the upgrade PRs weekly; the audit job blocks a merge in between.
+- **Custom key patterns are ReDoS-checked when the rule is built**, not on the logging path.
+  CPython's `re` cannot be interrupted mid-match, so an explosive pattern is rejected before it can
+  ever run — a nested quantifier like `(a+)+$` hangs at 40 characters and the 256-char key cap does
+  not bound it. `slpy-native` uses Rust's linear-time `regex` and is immune by construction.
 
 ---
 
@@ -505,6 +606,49 @@ It is the component that makes every log line correct, consistent, and safe befo
 | **Safety boundary** | ANSI/control-char stripping; per-transport isolation; guarded hooks | built in |
 | **Self-observability** | `get_stats()` — processed/failure counters, uptime, engine in use | `slpy.get_stats()` |
 | **Testing toolkit** | `SpyTransport` — assert on emitted, masked entries | `slpy.testing` |
+
+---
+
+## Working on slpy
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -e '.[dev,fastapi]' httpx maturin
+.venv/bin/maturin build --release -m slpy-native/Cargo.toml -i .venv/bin/python
+.venv/bin/pip install --force-reinstall slpy-native/target/wheels/*.whl
+git config core.hooksPath .githooks
+```
+
+`pytest` alone is not the full gate. Without the optional dependencies the suite reports
+`skipped` for the fourteen tests that compare the Rust and Python masking engines — the ones that
+exist to catch the two engines drifting apart — plus the FastAPI middleware. With everything
+installed there are **no skips**, and that is what CI enforces.
+
+The hooks run the same gate before a commit lands, and catch one thing CI would only catch later:
+if you edit `slpy-native/src` and do not rebuild, the suite still passes — against the previous
+wheel. The parity tests would be asserting the old binary while your change looks verified.
+
+| | pre-commit |
+| :-- | :-- |
+| on `main` | refuses (`SLPY_ALLOW_MAIN=1` to override) |
+| always | `ruff check` — F (pyflakes) and E9 only, no style |
+| `slpy-native/src` staged | `cargo check`, then refuses if the installed wheel is older than the source |
+| always | the suite, and it names which optional dependency is missing rather than passing quietly |
+
+CI adds two layers the hook does not: the suite on 3.9 → 3.13 and on the 3.7 floor, and an audit
+of both dependency trees (`pip-audit` over the third-party set, `cargo audit` over the addon's
+lockfile).
+
+Set `SLPY_PYTHON` if your environment is somewhere other than `.venv`.
+
+---
+
+## For coding agents
+
+`llms.txt` at the repo root is the compact API contract — the whole config shape, the emitted entry,
+every error and when it is raised, and the mistakes that are easy to make from memory. Every claim
+in it is pinned by `tests/test_llms_contract.py`, so it cannot drift from the code without the
+suite going red.
 
 ---
 

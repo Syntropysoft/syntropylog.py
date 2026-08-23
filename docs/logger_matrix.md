@@ -1,5 +1,16 @@
 # SyntropyLog Python - Logger Matrix
 
+> ⚠️ **Stale — this document predates the slpy refactor and does not describe the shipped library.**
+>
+> It documents a facade that does not exist (`syntropy_log.add_context`,
+> `add_context_with_matrix`, `configure_logger_matrix`, module-level `syntropy_log.debug/info/error`).
+> The real API is the `logging_matrix` key in `init()`, the async scope
+> `async with slpy.context(**fields)`, and `slpy.reconfigure_logging_matrix()` for runtime changes
+> (`slpy/core.py`, `slpy/matrix.py`).
+>
+> Rewrite tracked in `PARITY-ROADMAP.md`.
+
+
 ## 🎯 Overview
 
 La **Logger Matrix** es un sistema inteligente de filtrado de contexto que permite controlar exactamente qué campos se incluyen en los logs, evitando la contaminación con objetos kilométricos y campos innecesarios.

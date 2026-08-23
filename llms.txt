@@ -1,0 +1,387 @@
+# slpy — Syntropy Log for Python
+
+Declarative observability for Python: you declare what each log should carry, slpy assembles it.
+Structured logging with automatic context propagation over `contextvars`, PII masking by field
+name, compliance retention metadata, and a pluggable transport layer.
+
+PyPI package: **`slpy-log`**. Import name: **`slpy`**. Requires Python **>= 3.7**. Zero runtime
+dependencies; `[fastapi]` extra adds starlette for the middleware.
+
+Part of the SyntropyLog family — SyntropyLog (Node, the reference), sl4n (.NET),
+syntropylog-java (JVM). The masking primitive is shared: the same
+`mask-parity-cases.json` fixture is asserted by every port, so a value masked here reads exactly
+like the same value masked there.
+
+## Install & wire up
+
+```bash
+pip install slpy-log            # add [fastapi] for the middleware
+```
+
+```python
+import asyncio
+from slpy import slpy, ConsoleTransport
+
+async def main():
+    await slpy.init({
+        'logger': {'level': 'info', 'transports': [ConsoleTransport()]},
+        'masking': {'enable_default_rules': True},
+    })
+
+    log = slpy.get_logger('payments')
+    log.info('Ready')
+
+    async with slpy.context(request_id='req-1', user_id='u-2'):
+        log.info('Card charged', amount=299.9, email='john@example.com')
+
+    await slpy.shutdown()
+
+asyncio.run(main())
+```
+
+`slpy` is a module-level singleton (`from slpy import slpy`). `init()` and `shutdown()` are
+`async`; everything else is synchronous. Calling `init()` twice without `shutdown()` raises
+`RuntimeError`. Any public call before `init()` raises `RuntimeError` — except `is_initialized`.
+
+### The whole config shape
+
+```python
+await slpy.init({
+    'logger': {
+        'level': 'info',                    # debug | info | warn | error | audit | silent
+        'transports': [ConsoleTransport()], # default: [ConsoleTransport()]
+        'on_log_failure': None,             # (exc, transport) -> None. Never raises.
+    },
+    'masking': {
+        'enable_default_rules': True,
+        'rules': [{'pattern': r'^cuit$', 'strategy': 'token',
+                   'preserve_length': True, 'mask_char': '*'}],
+        'max_depth': 10,
+        'on_masking_error': None,           # (exc) -> None. Never receives the raw payload.
+        'exempt_transports': [],            # sink names that receive the entry UNMASKED
+    },
+    'context': {
+        'inbound':  {'default': {'correlation_id': 'X-Correlation-ID'}},
+        'outbound': {'http': {'correlation_id': 'X-Correlation-ID'},
+                     'kafka': {'correlation_id': 'correlationId'}},
+        'custom_headers': ['X-Tenant-ID'],
+    },
+    'logging_matrix': {'default': ['request_id'], 'error': ['*']},
+    'retention_policies': {'SOX_AUDIT': {'years': 7, 'class': 'SOX'}},
+    'observability': {'enabled': True, 'transports': []},
+})
+```
+
+`SLPY_LOG_LEVEL` overrides `logger.level` from the environment. It is the only environment variable
+slpy reads for configuration (`SLPY_NATIVE_DISABLE=1` disables the Rust addon).
+
+## Facade — `slpy`
+
+| Call | Returns | Notes |
+| --- | --- | --- |
+| `await slpy.init(config)` | `None` | Once. Raises `RuntimeError` if already initialized. |
+| `await slpy.shutdown()` | `None` | Resets all state. Safe to call repeatedly. |
+| `slpy.get_logger(name)` | `Logger` | Cached per name. |
+| `async with slpy.context(**fields)` | scope | Context for every log inside, across `await`. |
+| `slpy.get(field)` | `str \| None` | One context field's current value. |
+| `slpy.get_propagation_headers(target=None)` | `dict[str, str]` | Wire names from `context.outbound`; `target` defaults to `'http'`. |
+| `slpy.get_propagation_header_name(field)` | `str \| None` | The HTTP header name for a field. |
+| `slpy.set_level(level)` | `None` | Runtime, applies to every existing logger. |
+| `slpy.reconfigure_logging_matrix(matrix)` | `None` | Runtime. Only context visibility; masking, level and transports stay as set at init. |
+| `slpy.get_stats()` | `StatsSnapshot` | See Observability. |
+| `slpy.is_initialized` | `bool` | The only call that does not require init. |
+
+## Logger
+
+```python
+log = slpy.get_logger('payments')
+log.debug(msg, **fields); log.info(...); log.warn(...); log.error(...)
+log.audit(msg, **fields)                       # ALWAYS emitted, whatever the level
+log.child(order_id='o-1')                      # new logger with bound fields
+log.with_meta({'regulation': 'PCI'})           # sugar for child(meta={...})
+log.with_retention('SOX_AUDIT')                # tag with a retention policy
+```
+
+`warn`, not `warning`. Loggers are immutable: `child`, `with_meta` and `with_retention` all return
+a NEW logger. **A log call never raises** — a broken transport is isolated, counted in
+`get_stats()` and reported through `on_log_failure`.
+
+## Emitted entry
+
+```json
+{"level":"info","message":"Card charged","timestamp":"2026-08-23T14:00:00.123+00:00",
+ "service":"payments","request_id":"req-1","amount":299.9,"email":"j***@example.com"}
+```
+
+Field order: `level`, `message`, `timestamp`, `service`, then context, then bindings, then per-call
+kwargs — the most specific wins. `retention_until` is written last: the framework owns it and a
+kwarg cannot move a compliance date.
+
+`timestamp` is ISO-8601 with milliseconds and offset, always UTC.
+
+**Masking is by field NAME.** A value is masked when its key, or an ancestor key, matches a rule.
+Free text is never scanned: `log.info(f'user {email}')` is emitted as written. Pass sensitive data
+as keyword fields, not interpolated into the message.
+
+## Masking
+
+```python
+from slpy import MaskingRule, MaskingStrategy, MaskSpec, MASK_KEYS, mask_pattern
+```
+
+Default rules (on unless `enable_default_rules: False`), matched case-insensitively, and
+deliberately greedy — a key that *contains* the word matches, so `user_password` and `sessionKey`
+are covered:
+
+| Keys | Input | Output |
+| --- | --- | --- |
+| `email`, `mail`, `e-mail` | `john@example.com` | `j***@example.com` |
+| `password`, `pass`, `pwd`, `secret` | `hunter2` | `[REDACTED]` |
+| `token`, `key`, `auth`, `jwt`, `bearer` | `abc123xyz` | `[REDACTED]` |
+| `credit_card`, `card_number`, … | `4111-1111-1111-1234` | `****-****-****-1234` |
+| `ssn`, `social_security`, … | `123-45-6789` | `***-**-6789` |
+| `phone`, `mobile`, `tel`, `cell` | `+1 (555) 123-4567` | `+* (***) ***-4567` |
+
+Identifiers keep their separators and last four digits. **Credentials are redacted whole and
+`mask_char` does not apply to them** — a length-preserving password mask publishes the length.
+
+`MaskingStrategy`: `CREDIT_CARD | SSN | EMAIL | PHONE | PASSWORD | TOKEN | CUSTOM`.
+
+A strategy is DATA. `strategy_to_spec(strategy, mask_char, preserve_length)` expands it into a
+`MaskSpec`, and `apply_mask(value, spec)` applies one directly — both exported, both pure:
+
+```python
+MaskSpec(
+    redact=False,          # replace the whole value with REDACTED ('[REDACTED]'); wins over all
+    unmask_start=0,        # keep the first N units (chars, or digits when scope='digits')
+    unmask_end=0,          # keep the last N
+    scope=None,            # 'digits' masks only digits, keeping separators
+    keep_after=None,       # keep everything from this delimiter on (an email domain)
+    mask_char='*',
+    preserve_length=True,  # False caps the masked run at 8
+)
+```
+
+Pass `spec=` on a rule for a declarative custom mask that **also runs in the Rust engine**:
+
+```python
+MaskingRule(pattern=r'^cuit$', strategy=MaskingStrategy.CUSTOM,
+            spec=MaskSpec(scope='digits', unmask_end=1))   # 20-12345678-9 → **-********-9
+```
+
+`custom_mask=<callable>` also works but **cannot cross to Rust**, and forces the Python engine for
+that whole logger. Prefer `spec`.
+
+Build patterns from `MASK_KEYS` + `mask_pattern` instead of string literals, so secret scanners stay
+quiet: `mask_pattern(*MASK_KEYS['token'])` → `^(token|key|auth|jwt|bearer)$`.
+
+**ReDoS:** custom key patterns are checked when the RULE is built, not on the log path — CPython's
+`re` has no timeout, so an explosive pattern (`(a+)+$` hangs at 40 chars) is rejected before it can
+run. A nested unbounded quantifier raises `ValueError` from `MaskingRule(...)`. Rules only ever run
+against field names, capped at 256 characters.
+
+**Failsafe:** masking never throws. On failure the entry degrades to `level`/`timestamp`/`message`/
+`service` plus `_masking_failed: True` — the raw metadata never leaks — the failure is counted in
+`get_stats().masking_failures` and reported through `on_masking_error`.
+
+### One sink can receive the values unmasked
+
+```python
+audit = AdapterTransport(name='audit-journal', adapter=UniversalAdapter(executor=to_ledger))
+await slpy.init({
+    'logger':  {'transports': [ConsoleTransport(), audit]},
+    'masking': {'exempt_transports': ['audit-journal']},
+})
+```
+
+A transport is addressed by its `name` attribute, or by its class name when it has none
+(`transport_name(t)`). Declared in app config, **never by a transport about itself**. An unknown
+name raises `UnknownExemptTransportError` at `init()`; forgetting the key masks the sink, which
+errs safe. Exemption skips masking and **nothing else** — the Logging Matrix and the ANSI/control
+sanitizer still apply.
+
+## Retention
+
+```python
+await slpy.init({'retention_policies': {
+    'SOX_AUDIT': {'years': 7,   'class': 'SOX'},
+    'BCRA_A7724': {'months': 42, 'class': 'BCRA'},
+    'GDPR_ACCESS': {'days': 90,  'class': 'GDPR'},
+}})
+slpy.get_logger('payments').with_retention('SOX_AUDIT').audit('override', user_id='u-1')
+# retention: 'SOX_AUDIT'  retention_class: 'SOX'  retention_until: '2033-08-23'
+```
+
+| Field | Type | When |
+| --- | --- | --- |
+| `retention` | `str` | Always, for a registered policy. The REGISTERED spelling, never the caller's. |
+| `retention_class` | `str` | Always. |
+| `retention_days` | `int` | Only when the policy is declared in `days`. |
+| `retention_until` | `str` (`YYYY-MM-DD`) | When the policy declares a usable unit. |
+
+`retention_until` is the end of the mandatory window, materialized at write time so a sweep is a
+range scan. **Not an expiry:** reaching it ends the obligation, it does not authorize deletion.
+
+- **Declare exactly one unit.** Two raises `RetentionConfigurationError` at `init()`.
+- **Prefer the calendar unit.** `2555` days is 7 × 365 and ends two days before seven actual years.
+- **Rounding errs long, never short.** 31-Jan + 1 month → 3-Mar (not 28-Feb); 29-Feb + 1 year →
+  1-Mar.
+- **Anchored to the entry's own timestamp,** not to when the logger was built.
+- An **unregistered name raises** `RetentionPolicyNotFoundError` — from `with_retention()`, where
+  the logger is built, never from a log call.
+- Lookup is case-insensitive; the emitted label is always the registered spelling.
+- Inline: `with_retention({'months': 6, 'class': 'PCI'})` — no name, so no `retention` field, but
+  the window is still computed.
+
+### Resolving off the log path
+
+```python
+registry.policies                     # every policy, frozen, by canonical name
+registry.resolve(name)                # RetentionPolicy | None
+registry.require(name)                # RetentionPolicy, or RetentionPolicyNotFoundError
+registry.until(name, at)              # datetime.date | None — what the logger stamps
+registry.canonical_name(name)         # the registered spelling
+
+from slpy import retention_until, RetentionPolicy
+retention_until(date(2026, 1, 31), RetentionPolicy(months=1))   # → date(2026, 3, 3), pure
+```
+
+`until()` converts an aware datetime to UTC first, matching the logging path. The registry copies
+on construction and hands out a read-only view: a compliance window cannot be redefined for records
+already written.
+
+## Logging Matrix
+
+Per-level whitelist of which CONTEXT fields are emitted. It filters **only** the auto-propagating
+context — core fields, `child()` bindings and per-call kwargs are never filtered.
+
+```python
+'logging_matrix': {'default': ['request_id'], 'error': ['*'], 'debug': []}
+```
+
+`'*'` allows every context field. **A configured matrix with no `default` drops ALL context on an
+unlisted level** — that is the easiest thing to get wrong. No matrix at all means no filtering.
+`slpy.reconfigure_logging_matrix(...)` replaces it at runtime.
+
+## Context propagation
+
+Built on `contextvars`, so it survives `await`, `asyncio.gather()` and `create_task()`.
+
+```python
+async with slpy.context(request_id='req-1', tenant_id='acme'):
+    ...
+await httpx.get(url, headers=slpy.get_propagation_headers())
+await producer.send(topic, headers=slpy.get_propagation_headers('kafka'))
+```
+
+FastAPI/ASGI (needs the `[fastapi]` extra):
+
+```python
+from slpy.fastapi import SyntropyMiddleware
+app.add_middleware(SyntropyMiddleware, source='default')
+```
+
+`source` selects which map under `context.inbound` to read. The middleware generates a
+`correlation_id` when the inbound header is absent, adds `method` and `path` to the context, and
+echoes the propagated fields onto the response using the `context.outbound['http']` names.
+
+## Transports
+
+Anything with `log(entry: dict) -> None` is a transport. No base class required; inherit
+`Transport` only if you want the default `name` attribute.
+
+| | |
+| --- | --- |
+| `ConsoleTransport()` | JSON to stdout. The default. |
+| `PrettyConsoleTransport(colors=None)` | Colored human output; falls back to JSON when stdout is not a TTY. |
+| `AdapterTransport(name, adapter, formatter=None)` | Delegates to a `UniversalAdapter`. |
+| `UniversalAdapter(executor)` | Wraps a sync or async function that receives the entry. |
+| `DurableFileTransport(inner, spool_path)` | Disk spool: a failing inner transport does not lose entries; the backlog drains on the next successful write. |
+
+Set `self.name` when config needs to address the instance (several adapters of one class, or
+`exempt_transports`). A transport that raises is isolated, counted, and reported — other transports
+still receive the entry.
+
+## Observability
+
+```python
+stats = slpy.get_stats()   # StatsSnapshot
+stats.logs_processed       # entries emitted
+stats.transport_failures   # transport.log() raised and was absorbed
+stats.masking_failures     # masking failed; a safe payload was emitted
+stats.uptime_seconds
+stats.native_active        # the Rust masking engine is in use
+```
+
+`get_propagation_headers()` also emits an `OutboundEvent` (`target`, `headers`, `correlation_id`,
+`trace_id`, `timestamp`) to the observability transports — traceability of context leaving the
+service. Disable with `observability: {'enabled': False}`.
+
+## Errors
+
+| Exception | Raised |
+| --- | --- |
+| `RuntimeError` | Any call before `init()`, or `init()` twice. |
+| `ValueError` | Invalid `logger.level`; an unsafe custom key pattern at `MaskingRule(...)`. |
+| `RetentionConfigurationError` | A policy declaring more than one unit, at `init()`. |
+| `RetentionPolicyNotFoundError` | `with_retention(name)` / `require(name)` with an unregistered name. |
+| `UnknownExemptTransportError` | `masking.exempt_transports` names a transport that is not configured, at `init()`. |
+
+Every one of these is raised at wiring time. **No log call raises, ever.**
+
+## Testing
+
+```python
+from slpy.testing import SpyTransport
+
+spy = SpyTransport()
+await slpy.init({'logger': {'transports': [spy]}})
+
+spy.count                                   # int
+spy.entries                                 # list[dict], emit order, defensive copies
+spy.first_entry / spy.last_entry            # dict | None
+spy.at_level('error')                       # list[dict]
+spy.with_field('order_id', 'o-1')           # list[dict]
+spy.any_message_contains('info', 'charged') # bool
+spy.clear()
+```
+
+Thread-safe, and every accessor returns copies — mutating what you read affects nothing.
+`asyncio_mode = auto` is set in `pytest.ini`, so async tests need no decorator.
+
+## Native engine (Rust)
+
+`slpy-native` is an optional addon (`maturin`) that replaces the Python masking engine. Same
+semantics — asserted case by case against the shared fixture from BOTH engines. slpy loads it
+automatically when present and falls back silently when not. `get_stats().native_active` reports
+which one is live.
+
+A rule with a `custom_mask` callable disables it for that logger (a Python closure cannot cross).
+`SLPY_NATIVE_DISABLE=1` disables it entirely. The addon's `ENGINE_API` must match what slpy
+requires; an older wheel falls back to Python rather than run different semantics.
+
+## Common mistakes
+
+- `log.warning(...)` — the method is **`warn`**.
+- Interpolating PII into the message. Masking is by field name; the message is never scanned.
+- Expecting `logger.child(...)` to mutate. Every fluent call returns a new logger.
+- A configured `logging_matrix` without `default` — every unlisted level loses ALL context.
+- Expecting `mask_char` to apply to `password`/`token`. They redact whole, by design.
+- Reading `retention_days` for a policy declared in `years` or `months`. It is not emitted; read
+  `retention_until`.
+- `with_retention('TYPO')` — raises now, and it is raised where the logger is built.
+- Naming a sink in `exempt_transports` that does not exist — raises at `init()`.
+- Calling `init()` from sync code. It is a coroutine: `asyncio.run(main())`.
+- Assuming a `try/except` around a log call is needed. It is not; logging cannot raise.
+
+## Not in scope
+
+slpy attaches metadata and hands entries to transports. It does not store, ship, rotate or expire
+logs; it opens no network connections; it does not scan free text for PII. `SerializationManager`
+and `BrokerManager` from the Node reference were deliberately removed — `get_propagation_headers()`
+is the kept broker primitive.
+
+## Docs
+
+README.md · CHANGELOG.md · PARITY-ROADMAP.md (state and gaps vs the Node reference) ·
+https://github.com/Syntropysoft/syntropylog.py

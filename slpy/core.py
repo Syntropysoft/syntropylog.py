@@ -5,7 +5,7 @@ Lifecycle: await slpy.init(config) → use → await slpy.shutdown()
 """
 
 from contextlib import asynccontextmanager
-from typing import Any, Dict, Optional
+from typing import Any, Dict, FrozenSet, Optional
 
 from .config import ConfigManager
 from .context import ContextManager
@@ -15,7 +15,7 @@ from .matrix import LoggingMatrix
 from .observability import ConsoleObservabilityTransport, ObservabilityEngine, OutboundEvent
 from .retention import RetentionRegistry
 from .stats import SlpyStats, StatsSnapshot
-from .transport import ConsoleTransport, Transport
+from .transport import ConsoleTransport, resolve_exempt_transports
 
 
 class SyntropyLog:
@@ -37,6 +37,7 @@ class SyntropyLog:
         self._observability: Optional[ObservabilityEngine] = None
         self._loggers: Dict[str, Logger] = {}
         self._matrix: Optional[LoggingMatrix] = None
+        self._exempt_transports: FrozenSet[str] = frozenset()
         self._stats: Optional[SlpyStats] = None
         self._retention: Optional[RetentionRegistry] = None
 
@@ -92,6 +93,12 @@ class SyntropyLog:
         configured = cfg.logger.transports
         self._transports = list(configured) if configured else [ConsoleTransport()]
 
+        # Masking exemptions, validated against the transports that actually
+        # exist. Raises here rather than masking the audit sink in silence.
+        self._exempt_transports = resolve_exempt_transports(
+            masking_cfg.exempt_transports, self._transports
+        )
+
         # Observability — fall back to ConsoleObservabilityTransport if none provided
         obs_cfg = cfg.observability
         obs_transports = list(obs_cfg.transports) if obs_cfg.transports else [ConsoleObservabilityTransport()]
@@ -112,6 +119,7 @@ class SyntropyLog:
         self._loggers = {}
         self._matrix = None
         self._stats = None
+        self._exempt_transports = frozenset()
         self._retention = None
 
     # ------------------------------------------------------------------
@@ -137,6 +145,7 @@ class SyntropyLog:
                 stats=self._stats,
                 on_log_failure=self._config.logger.on_log_failure,
                 retention=self._retention,
+                exempt_transports=self._exempt_transports,
             )
         return self._loggers[name]
 

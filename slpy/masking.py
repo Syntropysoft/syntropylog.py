@@ -23,15 +23,27 @@ from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from ._regex_safety import assert_safe_key_pattern
+from .mask_spec import MaskSpec, apply_mask
 
 # ---------------------------------------------------------------------------
 # Native addon — loaded once, used transparently
 # ---------------------------------------------------------------------------
+# The boundary is versioned. An addon built against an older contract exposes a
+# different ENGINE_API (or none at all), and the import below fails — which is
+# the point: slpy drops to the Python engine rather than run an engine whose
+# semantics it cannot vouch for. Two engines that disagree is the bug family
+# this whole parity apparatus exists to prevent.
+_REQUIRED_ENGINE_API = 2
+
 _native: Any = None
 if os.environ.get("SLPY_NATIVE_DISABLE", "").strip() not in ("1", "true", "yes"):
     try:
-        from slpy_native import NativeMaskingEngine as _NativeMaskingEngine
-        _native = _NativeMaskingEngine
+        from slpy_native import ENGINE_API as _NATIVE_API  # type: ignore[import-not-found]
+        from slpy_native import (  # type: ignore[import-not-found]
+            NativeMaskingEngine as _NativeMaskingEngine,
+        )
+        if _NATIVE_API == _REQUIRED_ENGINE_API:
+            _native = _NativeMaskingEngine
     except ImportError:
         pass
 
@@ -46,13 +58,59 @@ class MaskingStrategy(Enum):
     CUSTOM = "custom"
 
 
+# ---------------------------------------------------------------------------
+# Strategies as data — the canonical mapping, and the only one in the project
+# ---------------------------------------------------------------------------
+
+def strategy_to_spec(
+    strategy: MaskingStrategy,
+    mask_char: str = "*",
+    preserve_length: bool = True,
+) -> MaskSpec:
+    """
+    Expand a built-in strategy into the :class:`MaskSpec` both engines interpret.
+    Byte-for-byte the family mapping (``strategyToSpec`` in the Node reference),
+    which is why a card masked by slpy now reads the same as one masked by
+    SyntropyLog, sl4n or the JVM port.
+
+    Identifiers (email / phone / card / ssn) keep a format-preserving partial —
+    the last 4 of an identifier is not the secret and it is what makes a log
+    debuggable. Credentials are redacted whole: a length-preserving password
+    mask publishes the length.
+
+    This mapping lives here and nowhere else. The Rust engine receives the
+    resolved spec and never learns what a strategy is, so the two cannot drift.
+    """
+    if strategy is MaskingStrategy.EMAIL:
+        return MaskSpec(
+            unmask_start=1, keep_after="@", mask_char=mask_char, preserve_length=preserve_length
+        )
+    if strategy in (MaskingStrategy.CREDIT_CARD, MaskingStrategy.SSN, MaskingStrategy.PHONE):
+        return MaskSpec(
+            scope="digits", unmask_end=4, mask_char=mask_char, preserve_length=preserve_length
+        )
+    if strategy in (MaskingStrategy.PASSWORD, MaskingStrategy.TOKEN):
+        return MaskSpec(redact=True)
+    # CUSTOM without a callable, and anything unforeseen: mask every character.
+    return MaskSpec(mask_char=mask_char, preserve_length=preserve_length)
+
+
 @dataclass
 class MaskingRule:
+    """
+    A key pattern plus what to do with the values under it.
+
+    `strategy` is the shorthand; `spec` is the same thing said directly, and it
+    wins when both are given. A `spec` crosses to the Rust engine — a
+    `custom_mask` callable cannot, and forces the Python engine for that rule.
+    """
+
     pattern: str
     strategy: MaskingStrategy
     custom_mask: Optional[Callable[[str], str]] = None
     preserve_length: bool = True
     mask_char: str = "*"
+    spec: Optional[MaskSpec] = None
 
     def __post_init__(self) -> None:
         # ReDoS defense happens HERE, at rule construction — not on the log hot path.
@@ -62,6 +120,10 @@ class MaskingRule:
         # Default rules are known-safe alternations and pass trivially.
         assert_safe_key_pattern(self.pattern)
         self._compiled = re.compile(self.pattern, re.IGNORECASE)
+        # Resolved once, at construction: the single thing both engines interpret.
+        self._spec = self.spec or strategy_to_spec(
+            self.strategy, self.mask_char, self.preserve_length
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -118,48 +180,26 @@ _MISS = object()
 # depth budget runs out — fixed width so nothing about the value leaks.
 _EXHAUSTED_MASK_LEN = 6
 
-_DIGITS_RE = re.compile(r"\D")
-
-
-# ---------------------------------------------------------------------------
-# Strategy maskers — pure functions, dispatched by table
-# ---------------------------------------------------------------------------
-
-def _mask_all(value: str, mask_char: str) -> str:
-    return mask_char * len(value)
-
-
-def _mask_keep_last4(value: str, mask_char: str) -> str:
-    digits = _DIGITS_RE.sub("", value)
-    if len(digits) < 4:
-        return _mask_all(value, mask_char)
-    return mask_char * (len(digits) - 4) + digits[-4:]
-
-
-def _mask_email_value(value: str, mask_char: str) -> str:
-    if "@" not in value:
-        return _mask_all(value, mask_char)
-    username, domain = value.split("@", 1)
-    if len(username) <= 2:
-        return f"{mask_char * len(username)}@{domain}"
-    return f"{username[0]}{mask_char * (len(username) - 2)}{username[-1]}@{domain}"
-
-
-_MASKERS: Dict[MaskingStrategy, Callable[[str, str], str]] = {
-    MaskingStrategy.CREDIT_CARD: _mask_keep_last4,
-    MaskingStrategy.SSN:         _mask_keep_last4,
-    MaskingStrategy.PHONE:       _mask_keep_last4,
-    MaskingStrategy.EMAIL:       _mask_email_value,
-    MaskingStrategy.PASSWORD:    _mask_all,
-    MaskingStrategy.TOKEN:       _mask_all,
-}
+def _push_rule(engine: Any, rule: MaskingRule) -> None:
+    """Hand one rule to the Rust engine as pattern + resolved spec. Pure plumbing:
+    it reads the rule and calls the boundary, and decides nothing."""
+    spec = rule._spec
+    engine.add_rule(
+        rule.pattern,
+        redact=spec.redact,
+        unmask_start=spec.unmask_start,
+        unmask_end=spec.unmask_end,
+        scope=spec.scope,
+        keep_after=spec.keep_after,
+        mask_char=spec.mask_char,
+        preserve_length=spec.preserve_length,
+    )
 
 
 def _apply_strategy(value: str, rule: MaskingRule) -> str:
     if rule.strategy is MaskingStrategy.CUSTOM and rule.custom_mask is not None:
         return rule.custom_mask(value)
-    masker = _MASKERS.get(rule.strategy, _mask_all)
-    return masker(value, rule.mask_char)
+    return apply_mask(value, rule._spec)
 
 
 # ---------------------------------------------------------------------------
@@ -285,7 +325,7 @@ class MaskingEngine:
         # _DECISION_CACHE_MAX.
         self._decision_cache: Dict[str, Optional[MaskingRule]] = {}
 
-        self._native = self._build_native(enable_default_rules, extra_rules or [], max_depth)
+        self._native = self._build_native(extra_rules or [], max_depth)
 
     @property
     def is_native(self) -> bool:
@@ -310,7 +350,7 @@ class MaskingEngine:
             self._native = None  # callables can't cross to Rust — stay in parity
             return
         try:
-            self._native.add_rule(rule.pattern, rule.strategy.value, rule.mask_char)
+            _push_rule(self._native, rule)
         except Exception:
             self._native = None  # never let the engines diverge
 
@@ -335,7 +375,6 @@ class MaskingEngine:
 
     def _build_native(
         self,
-        enable_default_rules: bool,
         extra_rules: List[MaskingRule],
         max_depth: int,
     ) -> Optional[Any]:
@@ -347,9 +386,12 @@ class MaskingEngine:
         if any(r.custom_mask is not None for r in extra_rules):
             return None
         try:
-            engine = _native(enable_default_rules=enable_default_rules, max_depth=max_depth)
-            for rule in extra_rules:
-                engine.add_rule(rule.pattern, rule.strategy.value, rule.mask_char)
+            engine = _native(max_depth=max_depth)
+            # EVERY rule is pushed, defaults included: the Rust engine holds no
+            # table of its own, so the two engines cannot fall out of step over
+            # which rules exist or in which order they match.
+            for rule in self._rules:
+                _push_rule(engine, rule)
             return engine
         except Exception:
             return None

@@ -24,10 +24,16 @@ Quick start:
 
 from .core import SyntropyLog
 from .durable import DurableFileTransport
-from .transport import Transport, ConsoleTransport, PrettyConsoleTransport, UniversalAdapter, AdapterTransport
-from .masking import MASK_KEYS, MaskingEngine, MaskingRule, MaskingStrategy, mask_pattern
+from .transport import (AdapterTransport, ConsoleTransport, PrettyConsoleTransport,
+                        Transport, UniversalAdapter, UnknownExemptTransportError,
+                        transport_name)
+from .masking import (MASK_KEYS, MaskingEngine, MaskingRule, MaskingStrategy,
+                      mask_pattern, strategy_to_spec)
+from .mask_spec import REDACTED, MaskSpec, apply_mask
 from .matrix import LoggingMatrix
-from .retention import RetentionPolicy, RetentionRegistry
+from .retention import (RetentionConfigurationError, RetentionPolicy,
+                        RetentionPolicyNotFoundError, RetentionRegistry)
+from .retention_window import retention_until
 from .stats import StatsSnapshot
 from .observability import ObservabilityTransport, ConsoleObservabilityTransport, OutboundEvent
 from .logger import Logger
@@ -43,16 +49,25 @@ __all__ = [
     "PrettyConsoleTransport",
     "UniversalAdapter",
     "AdapterTransport",
+    "UnknownExemptTransportError",
+    "transport_name",
     "DurableFileTransport",
     "MaskingEngine",
     "MaskingRule",
     "MaskingStrategy",
     "MASK_KEYS",
     "mask_pattern",
+    "MaskSpec",
+    "apply_mask",
+    "strategy_to_spec",
+    "REDACTED",
     "LoggingMatrix",
     "StatsSnapshot",
     "RetentionPolicy",
     "RetentionRegistry",
+    "RetentionPolicyNotFoundError",
+    "RetentionConfigurationError",
+    "retention_until",
     "ObservabilityTransport",
     "ConsoleObservabilityTransport",
     "OutboundEvent",

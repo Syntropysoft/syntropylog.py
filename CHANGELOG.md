@@ -14,6 +14,265 @@ Released ahead of 2.0.0 on purpose. 2.0.0 changes what a masked value looks like
 asserts on log output will want to pin `<2.0.0` for a while; this release means that pin does not
 also cost them the ReDoS hardening and the performance work.
 
+### Added — `llms.txt`, and it is asserted rather than asserted-to
+
+The compact API contract a code-generating agent reads, mirroring the Node and .NET siblings. A
+wrong line in it becomes wrong code in somebody else's repository, so every claim was checked
+against the source — and then the checks were kept: `tests/test_llms_contract.py` pins 44 of them.
+The document can no longer go stale in silence.
+
+What the tests pin is the set of things an agent gets wrong from memory: the method is `warn`, not
+`warning`; every facade call raises `RuntimeError` before `init()` and `is_initialized` is the only
+one that does not; the six default masking outputs exactly as printed; a configured matrix with no
+`default` drops all context on an unlisted level; `retention_days` is absent for a policy declared
+in years; the degraded payload after a masking failure is exactly five fields and leaks no
+metadata; and `SLPY_LOG_LEVEL` and `SLPY_NATIVE_DISABLE` are the only environment variables the
+package reads — that last one asserted over the whole package rather than claimed.
+
+It ships in the sdist. Not in the wheel: a wheel installs the package directory, and putting it
+there would mean a second copy that can drift from the one at the repo root. sl4n ships its copy
+inside the nupkg; this is the honest limitation of the Python packaging shape, stated rather than
+papered over.
+
+### Fixed — `py.typed` was declared and did not exist
+
+`pyproject.toml` has listed `slpy = ["py.typed"]` under `package-data` since the beginning, and the
+file was never created, so **1.0.0 shipped without the PEP 561 marker**. A type checker is entitled
+to ignore every annotation in a package without it — which, for a fully annotated codebase that
+advertises typing support, means the annotations were doing nothing for consumers who follow the
+spec strictly. The marker exists now, ships in both wheel and sdist, and a test pins both halves:
+the file is there, and it is still declared.
+
+Running a type checker over the package for the first time also turned up four real annotation
+defects, all fixed here: `RetentionRegistry.policies` was annotated `Dict` while returning a
+read-only `MappingProxyType` — the signature promised mutability the object refuses — and is now
+`Mapping`; `PrettyConsoleTransport(colors: bool = None)` had a default its own annotation rejected,
+now `Optional[bool]`; `clean_tree` bound one name to both a dict and a list; and
+`_exempt_transports` had no annotation. What remains is thirteen reports of one pattern mypy
+cannot see through (`_require_initialized()` narrows the singleton's optional state, and mypy has
+no way to know), plus starlette imports that resolve once the `[fastapi]` extra is installed.
+Neither is a defect; both are recorded in `PARITY-ROADMAP.md` rather than silenced.
+
+### Added — masking exemption per sink: the audit ledger gets the truth
+
+Masking runs once, before the transport loop, so until now every sink received the same redacted
+entry. That is right for consoles and APMs and wrong for exactly one: the compliance ledger, where
+`j***@example.com` proves nothing.
+
+```python
+audit = AdapterTransport(name='audit-journal', adapter=UniversalAdapter(executor=to_ledger))
+await slpy.init({
+    'logger':  {'transports': [ConsoleTransport(), audit]},
+    'masking': {'exempt_transports': ['audit-journal']},
+})
+```
+
+A transport is addressed by its `name`, or by its class name when it has none — `transport_name()`
+reads an attribute rather than requiring a base class, because slpy's transports are duck-typed and
+plenty of real ones (including every sink in this repo's own tests) inherit nothing.
+
+**Declared in app config, never by a transport about itself.** The check lives in the logger, where
+the sink's identity is known; a transport has no way to ask for it. There is a test whose sink sets
+`exempt_from_masking = True` and gets masked anyway. An unknown name raises
+`UnknownExemptTransportError` at `init()` and lists the configured transports: exempting a sink
+removes masking from it, so a typo would leave the audit ledger masked — silently, exactly where
+the truth was required. Forgetting the key masks the sink, which errs safe.
+
+**It skips masking and nothing else.** The Logging Matrix has already decided which context fields
+exist, and the sanitizer still runs on the exempt line — an audit ledger must not receive ANSI
+escapes either, because a forged log line is a forged log line whether or not the values are
+masked. Both pinned by test.
+
+**Cost when unused is zero,** and the proof is object identity rather than a benchmark: with no
+exemption declared, every sink receives the same entry object, because the second projection is
+never built.
+
+`AdapterTransport`'s name is now public (`transport.name`, was `_name`) — it is how config
+addresses the sink.
+
+### Added — `retention_until`, the compliance window materialized at write time
+
+An entry tagged with a retention policy now also carries the date its window ends, so a purge is an
+indexable range scan (`WHERE retention_until < CURRENT_DATE`) instead of a computed expression, and
+records filed under an older revision of a policy keep the window that was in force when they were
+written. It is **not** an expiry: reaching it ends the obligation, it does not authorize deletion.
+
+`RetentionPolicy` gained **`months`** and **`years`** alongside `days`. Declare exactly one — a
+policy declaring two **refuses to start**, raising `RetentionConfigurationError` while the registry
+is built, never from the logging path. An ambiguous compliance window has no safe default, and a
+host that will not boot beats records swept on a date nobody chose. (The Node reference is lenient
+here and lets `years` win, for a reason that is specific to its history: `months` was an unread key
+in existing configs, so refusing would have *removed* a date from records that already got one. In
+slpy both units are new, so no config can be carrying both by accident, and there is nothing to
+preserve. Recorded as a deliberate divergence in `PARITY-ROADMAP.md`.)
+
+**The arithmetic rounds long, on purpose.** 31-Jan plus one month has no 31-Feb to land on. Clamping
+back to 28-Feb — what most date libraries do — ends the window up to three days early, the exact
+failure retention exists to prevent, so slpy rolls forward to 3-Mar; 29-Feb plus a year lands on
+1-Mar. Pinned across every short month and both leap-day cases.
+
+**Anchored to the entry's own timestamp, not to when the logger was built.** `with_retention()`
+returns a logger, and a logger built at startup would otherwise stamp the same date on records
+written months later. The date is computed in `_emit` from the same instant the entry's `timestamp`
+comes from — one clock read per entry, so the two can never disagree — and written after your
+kwargs, because the framework owns this field and a caller must not be able to hand-write the date
+a compliance sweep will read.
+
+Emitted as an ISO `YYYY-MM-DD` string, never a `date` object, so no transport can format it by the
+server's locale.
+
+`retention_days` now travels **only when the policy is declared in days**. A policy declared in
+years has no day count and slpy will not invent one — the materialized date is what such a policy
+carries.
+
+### Added — resolving a policy without going through a logger
+
+A domain write path that persists retention in its own column now gets the same answer the logger
+stamps, from the same registry and the same arithmetic. `RetentionRegistry` gained:
+
+- `policies` — every policy, frozen, keyed by canonical name.
+- `require(name)` — the policy, or `RetentionPolicyNotFoundError` carrying the sorted registered
+  names. `resolve(name)` keeps returning `None` and is unchanged: making an existing call throw
+  would be the worst kind of break — same name, same signature, different failure mode.
+- `until(name, at)` — the same date the logging path stamps, anchored in UTC (an aware datetime is
+  converted first: a record written at 21:00 in UTC-5 belongs to the next UTC day, and the two
+  answers have to agree).
+- `retention_until(at, policy)` is exported as the pure function underneath.
+
+**The registry is now genuinely frozen.** It copied nothing before: the dict you passed to the
+constructor stayed live, so editing it afterwards redefined a compliance window for records already
+written under the old one. It now copies on construction and exposes a `MappingProxyType`; both
+routes have a test.
+
+### Changed (breaking) — retention contract
+
+- **An unregistered policy name now raises** `RetentionPolicyNotFoundError` instead of stamping the
+  name and continuing. It raises from `with_retention()` — where the logger is built, once, at
+  wiring time — and **never from a log call**: the promise that logging cannot throw is unchanged,
+  and there is a test that says so. A typo that travelled silently was a record persisted with no
+  retention at all, discovered at audit time rather than at deploy time.
+- **The emitted name is the registered spelling.** Lookup stays case-insensitive, but `resolve()`
+  lowercased while `stamp()` echoed whatever the caller typed, so one policy could travel as
+  `SOX_AUDIT` on some records and `sox_audit` on others. Everything downstream — Loki label
+  matchers, index filters, a sweep's `WHERE` clause — matches an exact low-cardinality string, so a
+  sweep on one spelling found half the records.
+- **`retention_days` is omitted for policies not declared in days** (see above).
+
+### Changed (breaking) — masked values now match the rest of the family
+
+**What a masked value looks like changes for all five built-in strategies.** slpy's masking was
+never canonical: the family expresses a strategy as a `MaskSpec` — data both engines interpret —
+and asserts a shared 17-case fixture from every port. slpy had neither. It had six hand-written
+masker functions in Python, six more in Rust, and thirteen expectations of its own.
+
+| input | before | now |
+| :-- | :-- | :-- |
+| `john@example.com` | `j**n@example.com` | `j***@example.com` |
+| `4111-1111-1111-1234` | `************1234` | `****-****-****-1234` |
+| `123-45-6789` | `*****6789` | `***-**-6789` |
+| `+1 (555) 123-4567` | `*******4567` | `+* (***) ***-4567` |
+| `hunter2` under `password`/`token` | `*******` | `[REDACTED]` |
+
+Two of those are security, not cosmetics. A credential is now redacted whole because a
+length-preserving mask **publishes the length of the secret** — `*******` says the password has
+seven characters, `[REDACTED]` says nothing — and for the same reason `mask_char` is now ignored
+for `password` and `token`. And slpy's email mask used to keep the **last** character of the local
+part as well as the first, revealing one character more than every sibling. Identifiers still keep
+their last four digits and now keep their separators too: the format is what makes a masked value
+readable in a log, and the last four of a card are not the secret.
+
+**Migration.** If you assert on masked output — a snapshot test, a log-parsing rule, a dashboard
+regex — the values above are what changes. Nothing else does: the API is the same, the rules match
+the same field names, and an entry that was masked before is masked now. If you had set
+`mask_char` on a `password` or `token` rule, it no longer has an effect; use `MaskingStrategy.CUSTOM`
+if you want a full mask with your own character.
+
+### Added — a masking strategy is data, and it crosses to Rust as data
+
+- **`MaskSpec`, `apply_mask()` and `strategy_to_spec()` are public.** A `MaskSpec` says how to mask
+  a string — `redact`, `unmask_start`, `unmask_end`, `scope`, `keep_after`, `mask_char`,
+  `preserve_length` — and a `MaskingRule` now takes one directly via `spec=`, which **overrides the
+  strategy and still crosses into the Rust engine**. Previously the only way to write a custom mask
+  was a `custom_mask` callable, which cannot cross and quietly forced the whole logger onto the
+  Python engine. Both slpy engines are transliterations of the canonical pair that already exists
+  in the family, so the shared `tests/mask-parity-cases.json` — byte-identical to the copies in
+  SyntropyLog and syntropylog-java — is asserted three ways here: against the pure primitive,
+  against the Python engine, and against the Rust engine.
+
+- **`preserve_length` does something.** It was accepted in config, stored on the rule, and read by
+  neither engine — `slpy-native` was at least honest about it (`let _ = preserve_length;`). It now
+  caps the masked run at 8 characters so the output does not publish the original length.
+
+### Changed — internal
+
+- **The Rust engine stopped owning a rule table, and stopped knowing what a strategy is.** It used
+  to carry its own copy of the six default patterns and its own strategy→mask functions, kept in
+  lockstep with Python's by comment. Python now resolves every strategy into a spec and pushes
+  every rule across, defaults included; Rust only interprets specs. One rule list, one mapping, in
+  one language — the two engines can no longer disagree about which rules exist, in what order they
+  match, or what a strategy means. Note that the shared fixture would **not** have caught a drift
+  in that mapping: it pins `apply_mask`, not the strategy presets.
+
+- **The addon boundary is versioned.** `slpy_native.ENGINE_API` must match what `slpy/masking.py`
+  requires; on a mismatch — an addon built from an older wheel — slpy falls back to the Python
+  engine instead of running an engine whose semantics it cannot vouch for. The old code would have
+  called a changed API, caught the `TypeError`, and carried on.
+
+- **A transliteration trap, pinned by its own test.** Python's `str.isdigit()` is true for `'²'`
+  and `'٣'`; Rust's `is_ascii_digit()` is not. Writing `mask_digits` with the builtin would pass
+  all 17 fixture cases — every one of them is ASCII — and still disagree with the Rust engine on
+  any non-ASCII digit. `_is_ascii_digit` is explicit, and
+  `test_non_ascii_digits_do_not_diverge` covers what the fixture cannot.
+
+### Added — internal
+
+- **The gate runs on every push, and the engine-drift lock finally runs at all.** There was no CI
+  workflow on push or pull request: `publish.yml` ran the suite only on a version tag and
+  `benchmark.yml` never called pytest. Worse, the 14 tests that compare the Rust and Python
+  masking engines — the regression lock against the bug family that hit SyntropyLog (Node) #2,
+  two engines drifting until one leaks PII — could not run in either, because the one workflow
+  that builds the addon does not test and the one that tests does not build it. They were built
+  and run locally for this release: they pass. Coverage was never the problem; execution was.
+
+  `ci.yml` adds three jobs. `test` runs the suite on 3.9/3.11/3.12/3.13. `parity-native` builds
+  `slpy-native` with maturin, installs every optional dependency, and **fails if any test is
+  skipped** — with all of them present, a skip means a control did not run. `floor` runs on
+  CPython **3.7**, the version `requires-python` has always declared and nothing ever verified
+  (the publish matrix starts at 3.9); it needs `ubuntu-22.04`, the last runner that provides it,
+  and was confirmed green at 3.7.17 before the job was written.
+
+- **The same gate as git hooks** (`.githooks/`, enabled with
+  `git config core.hooksPath .githooks`). pre-commit refuses a commit on `main` and runs the
+  suite; pre-push runs it and says out loud which optional dependency is missing and therefore
+  which control did not run — silence there is how the parity lock stayed dormant for a year.
+  Every path was verified by making it fail — on `main`, with no pytest available, and on a
+  deliberately broken tree — not only by watching it pass on a clean one. Note for anyone with a
+  global `core.hooksPath`: the repo-level setting overrides it, so the refuse-on-`main` guard is
+  replicated inside this repo's hook rather than assumed from outside.
+
+### Fixed — internal
+
+- **pytest was configured in two places and one of them was dead.** `pytest.ini` and
+  `[tool.pytest.ini_options]` in `pyproject.toml` declared the same two settings; `pytest.ini`
+  wins, so edits to the other had no effect and nothing said so. The dead block is gone and
+  `pytest.ini` says why it is the only one.
+
+- **Three documents described a library that does not exist.** `docs/data_masking.md`,
+  `docs/lifecycle.md` and `docs/logger_matrix.md` predate the slpy refactor and document eleven
+  facade methods that were never in the shipped package (`add_masking_rule`, `mask_data`,
+  `get_masking_stats`, `add_shutdown_handler`, `get_status`, `add_context`,
+  `add_context_with_matrix`, `configure_logger_matrix`, and module-level `info`/`debug`/`error`),
+  a flatten/unflatten architecture the engine does not use, and masked values it does not
+  produce. Each now opens with what is wrong and where the accurate answer is; the rewrite is
+  tracked in `PARITY-ROADMAP.md`.
+
+- **`PARITY-ROADMAP.md` claimed a parity slpy does not have.** It stated that masking was
+  `MaskSpec`-based and asserted the shared 17-case `mask-parity-cases.json` "same contract as
+  JS/Rust/JVM". Neither is true: there is no `MaskSpec` in `slpy/`, no copy of that fixture in the
+  repo, and the masked output differs from the canon on all five built-in strategies. The
+  corrected state, the measured divergence and the decision to adopt the canon in 2.0.0 are now
+  recorded there. The header was also two versions stale (0.4.0, 158 tests).
+
 ### Performance
 
 - **Masking is 3.3x faster in the Python engine (5,576 → 1,697 ns/op) via a bounded

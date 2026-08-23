@@ -1,5 +1,20 @@
 # SyntropyLog Python - Data Masking Engine
 
+> ⚠️ **Stale — this document predates the slpy refactor and does not describe the shipped library.**
+>
+> It documents a facade that does not exist (`syntropy_log.add_masking_rule`, `mask_data`,
+> `get_masking_stats`, module-level `syntropy_log.info`), a flatten/unflatten architecture the
+> engine does not use (masking is a depth-bounded recursive walk — `_mask_tree` in
+> `slpy/masking.py`), and outputs that are only half right: the card and SSN examples happen to
+> match what slpy emits since it adopted the family's `MaskSpec`, while `j***e@example.com` never
+> did (it is `j***@example.com`) and a password is `[REDACTED]`, not a run of asterisks. The
+> `preserve_length=True` / `False` pairs showing identical output documented a flag that was dead
+> config at the time; it is live now and the two differ.
+>
+> Accurate today: `README.md` (§ Masking), `slpy/mask_spec.py` and `tests/mask-parity-cases.json`.
+> Rewrite tracked in `PARITY-ROADMAP.md`.
+
+
 ## 🎯 Overview
 
 El **DataMaskingEngine** es un motor de enmascaramiento ultra-rápido que utiliza la estrategia de **aplanado JSON** para procesar cualquier estructura de datos compleja con velocidad extrema.

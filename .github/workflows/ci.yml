@@ -1,0 +1,155 @@
+name: CI
+
+on:
+  push:
+    branches: [develop, main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.11", "3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install
+        run: pip install -e ".[dev,fastapi]" httpx
+
+      - name: Tests
+        run: pytest -q -rs
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: pip install -e ".[dev]"
+
+      # F (pyflakes) + E9 only — see [tool.ruff.lint] in pyproject.toml.
+      - name: ruff
+        run: ruff check slpy/ tests/
+
+  audit:
+    # This library masks PII, so a known-vulnerable dependency is not a paperwork
+    # problem. The core ships zero runtime dependencies, but the Rust addon pulls
+    # pyo3 and regex, and this repo has already taken one real hit there
+    # (pyo3 0.27 -> 0.29, a high plus a medium). Dependabot files the PRs; this
+    # blocks the merge in between.
+    name: Audit (Python + Rust)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # Auditing the installed environment does not work here: pip-audit cannot
+      # resolve the editable slpy-log or the locally built slpy-native, and exits
+      # non-zero for that reason alone — a red job that says nothing about security.
+      # Freezing the third-party set and auditing THAT keeps --strict meaningful:
+      # anything that cannot be checked is still a failure, and the only two
+      # exclusions are this repo's own packages, by name.
+      - name: pip-audit (third-party set)
+        run: |
+          pip install pip-audit
+          pip install -e ".[dev,fastapi]" httpx
+          pip freeze --exclude-editable | grep -v '^slpy' > /tmp/third-party.txt
+          pip-audit --strict -r /tmp/third-party.txt
+
+      - name: cargo audit
+        run: |
+          cargo install cargo-audit --locked
+          cargo audit --file slpy-native/Cargo.lock --deny warnings
+
+  floor:
+    # `requires-python = ">=3.7"` is the declared floor and nothing verified it: the
+    # publish workflow starts at 3.9. 3.7 is not available on ubuntu-latest — 22.04 is
+    # the last runner that provides it. Verified green (174 passed) on CPython 3.7.17
+    # before this job existed; it is here so the floor stops being a claim.
+    # fastapi is left out on purpose: it requires a newer Python, so the middleware
+    # tests skip here and the matrix above is what covers them.
+    name: Floor (Python 3.7)
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.7"
+
+      - name: Install
+        run: pip install -e ".[dev]"
+
+      - name: Tests
+        run: pytest -q -rs
+
+  parity-native:
+    # The 14 engine-drift tests are the regression lock against the bug family that hit
+    # SyntropyLog (Node) #2 — two masking engines drifting until one leaks PII — and they
+    # had never run in CI: benchmark.yml builds the addon and never calls pytest,
+    # publish.yml calls pytest and never builds the addon. A control nobody executes is
+    # not a control. Here every optional dependency is installed, so a skip is a failure.
+    name: Engine parity (Rust addon)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            slpy-native/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('slpy-native/Cargo.toml') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Install
+        run: pip install -e ".[dev,fastapi]" httpx
+
+      - name: Build and install slpy-native
+        run: |
+          pip install maturin
+          maturin build --release --manifest-path slpy-native/Cargo.toml
+          pip install --force-reinstall slpy-native/target/wheels/*.whl
+
+      - name: Tests — a skip here is a failure
+        run: |
+          set -o pipefail
+          pytest -q -rs | tee pytest.out
+          if grep -qi "skipped" pytest.out; then
+            echo "::error::the suite skipped tests with every optional dependency installed — the engine-drift lock did not run"
+            exit 1
+          fi

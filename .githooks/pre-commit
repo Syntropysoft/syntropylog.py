@@ -1,0 +1,8 @@
+#!/usr/bin/env sh
+# Gate de commit: rama correcta + lint + el gemelo Rust al día + suite verde.
+. "$(dirname "$0")/_gate.sh"
+
+refuse_on_main
+gate_lint
+gate_native_is_current
+gate_tests

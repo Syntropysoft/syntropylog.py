@@ -1,0 +1,5 @@
+#!/usr/bin/env sh
+# Gate de push: la suite completa, y qué quedó sin ejercitar dicho en voz alta.
+. "$(dirname "$0")/_gate.sh"
+
+gate_tests
