@@ -1,8 +1,7 @@
 """Tests for PrettyConsoleTransport."""
 
 import json
-import pytest
-from slpy.transport import PrettyConsoleTransport, ConsoleTransport
+from slpy.transport import PrettyConsoleTransport
 
 
 def make_entry(**kwargs):

@@ -508,6 +508,14 @@ It is the component that makes every log line correct, consistent, and safe befo
 - **Log-injection boundary** built in (ANSI/control-char stripping).
 - **Masking failsafe** — a masking failure yields a safe payload, never the raw metadata.
 - `custom_mask` functions in masking rules are consumer-supplied configuration, not influenced by external input.
+- **Both dependency trees are audited on every push and pull request** — `pip-audit` over the
+  third-party Python set and `cargo audit` over `slpy-native/Cargo.lock`, which is where the real
+  surface is: the core ships zero runtime dependencies, and the addon pulls pyo3 and regex.
+  Dependabot files the upgrade PRs weekly; the audit job blocks a merge in between.
+- **Custom key patterns are ReDoS-checked when the rule is built**, not on the logging path.
+  CPython's `re` cannot be interrupted mid-match, so an explosive pattern is rejected before it can
+  ever run — a nested quantifier like `(a+)+$` hangs at 40 characters and the 256-char key cap does
+  not bound it. `slpy-native` uses Rust's linear-time `regex` and is immune by construction.
 
 ---
 
@@ -553,8 +561,13 @@ wheel. The parity tests would be asserting the old binary while your change look
 | | pre-commit |
 | :-- | :-- |
 | on `main` | refuses (`SLPY_ALLOW_MAIN=1` to override) |
+| always | `ruff check` — F (pyflakes) and E9 only, no style |
 | `slpy-native/src` staged | `cargo check`, then refuses if the installed wheel is older than the source |
 | always | the suite, and it names which optional dependency is missing rather than passing quietly |
+
+CI adds two layers the hook does not: the suite on 3.9 → 3.13 and on the 3.7 floor, and an audit
+of both dependency trees (`pip-audit` over the third-party set, `cargo audit` over the addon's
+lockfile).
 
 Set `SLPY_PYTHON` if your environment is somewhere other than `.venv`.
 

@@ -1,0 +1,23 @@
+# Security updates land here instead of being noticed by hand. The pyo3 0.27→0.29
+# bump (a high plus a medium) came from Dependabot's default alerts with no config
+# file at all; this adds the scheduled version updates the alerts do not cover, and
+# the two ecosystems the repo actually ships: the Rust addon and the workflows.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /slpy-native
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5

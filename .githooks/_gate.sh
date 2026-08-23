@@ -74,6 +74,21 @@ gate_native_is_current() {
         .venv/bin/pip install --force-reinstall slpy-native/target/wheels/*.whl"
 }
 
+# Lint before tests: it is instant, and a dead import or an undefined name is a
+# defect the suite can miss entirely (an `except NameError` swallowing it, a branch
+# no test walks). Narrow on purpose — F + E9, no style.
+gate_lint() {
+    py=$(require_python)
+    "$py" -m ruff --version >/dev/null 2>&1 || {
+        say "  ! ruff no está instalado en este entorno; el lint no corrió (lo corre CI).
+    Para tenerlo local:  .venv/bin/pip install -e '.[dev]'"
+        return 0
+    }
+    say "  → ruff"
+    "$py" -m ruff check slpy/ tests/ || die "ruff encontró problemas. Muchos se arreglan con:
+    .venv/bin/python -m ruff check --fix slpy/ tests/"
+}
+
 # $1 = "strict" → un test skipeado también es error (todas las opcionales instaladas).
 gate_tests() {
     py=$(require_python)

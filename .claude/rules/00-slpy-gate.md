@@ -47,10 +47,20 @@ pip install maturin && maturin build --release -m slpy-native/Cargo.toml
 pip install --force-reinstall slpy-native/target/wheels/*.whl
 ```
 
-Desde 2026-08-23 hay `ci.yml` (push + PR): `test` en 3.9/3.11/3.12/3.13, `floor` en 3.7
-(`ubuntu-22.04`, el último runner que lo tiene), y `parity-native` con el addon compilado donde
-**un skip es un job rojo**. Los mismos chequeos como hooks en `.githooks/`
-(`git config core.hooksPath .githooks`).
+Desde 2026-08-23 hay `ci.yml` (push + PR), cinco jobs: `test` en 3.9/3.11/3.12/3.13, `lint`
+(ruff, solo `F` + `E9` — el select vive en `pyproject.toml`), `audit` (`pip-audit` sobre el set
+third-party + `cargo audit` sobre `slpy-native/Cargo.lock`), `floor` en 3.7 (`ubuntu-22.04`, el
+último runner que lo tiene), y `parity-native` con el addon compilado donde **un skip es un job
+rojo**.
+
+Los hooks en `.githooks/` (`git config core.hooksPath .githooks`) corren lint + suite, y una capa
+que CI no tiene: si `slpy-native/src` está staged, `cargo check` y **rechaza si el wheel instalado
+es más viejo que el fuente**. ❌ NEVER confiar en un `pytest` verde después de tocar Rust sin
+recompilar: la suite estaría asertando el binario anterior.
+
+⚠️ `pip-audit` sobre el entorno instalado **no sirve acá**: no puede resolver el `slpy-log`
+editable ni el `slpy-native` compilado local, y sale en rojo por eso solo. El job congela el set
+third-party y auditea eso, así `--strict` sigue significando algo.
 
 ⚠️ `core.hooksPath` a nivel repo **pisa el global**. Por eso el guard de "no commitear en main" está
 replicado dentro del hook del repo y no se asume de afuera.

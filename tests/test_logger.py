@@ -102,7 +102,9 @@ def test_child_carries_bindings(logger, transport):
 def test_child_does_not_mutate_parent(logger, transport):
     child = logger.child(extra="value")
     logger.info("Parent log")
-    assert "extra" not in transport.last()
+    assert "extra" not in transport.last()   # el padre quedó intacto
+    child.info("Child log")
+    assert transport.last()["extra"] == "value"   # y el hijo sí lo lleva
 
 
 def test_nested_child_merges_bindings(logger, transport):

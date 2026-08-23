@@ -36,7 +36,19 @@ Issues = "https://github.com/Syntropysoft/syntropylog.py/issues"
 
 [project.optional-dependencies]
 fastapi = ["fastapi>=0.100.0"]
-dev = ["pytest>=7.0.0", "pytest-asyncio>=0.21.0", "pytest-cov>=4.0.0"]
+dev = ["pytest>=7.0.0", "pytest-asyncio>=0.21.0", "pytest-cov>=4.0.0", "ruff>=0.6"]
+
+[tool.ruff]
+# The declared floor. Only relevant to rules that reason about version-specific
+# syntax; kept accurate anyway so it does not become one more stale claim.
+target-version = "py37"
+
+[tool.ruff.lint]
+# Deliberately narrow: F is pyflakes (dead imports, undefined names, unused
+# variables — real defects) and E9 is syntax and IO errors. Style is not in the
+# gate, because a gate that argues about line length gets switched off. Widen by
+# adding to this list, never by adding `--exit-zero`.
+select = ["F", "E9"]
 
 [tool.setuptools.packages.find]
 include = ["slpy", "slpy.*"]

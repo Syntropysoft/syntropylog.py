@@ -15,7 +15,7 @@ from .matrix import LoggingMatrix
 from .observability import ConsoleObservabilityTransport, ObservabilityEngine, OutboundEvent
 from .retention import RetentionRegistry
 from .stats import SlpyStats, StatsSnapshot
-from .transport import ConsoleTransport, Transport
+from .transport import ConsoleTransport
 
 
 class SyntropyLog:
