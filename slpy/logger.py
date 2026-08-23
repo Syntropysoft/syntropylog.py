@@ -6,10 +6,11 @@ Synchronous hot path — no background workers, no queues.
 """
 
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
+from typing import Any, Callable, Dict, FrozenSet, List, Optional, TYPE_CHECKING
 
 from . import retention_window
 from .sanitize import clean_tree
+from .transport import transport_name
 
 
 def _iso_timestamp(at: datetime) -> str:
@@ -50,6 +51,7 @@ class Logger:
         on_log_failure: Optional[Callable[[BaseException, "Transport"], None]] = None,
         retention: Optional["RetentionRegistry"] = None,
         retention_policy: Optional["RetentionPolicy"] = None,
+        exempt_transports: FrozenSet[str] = frozenset(),
     ) -> None:
         self._name = name
         self._level = level
@@ -64,6 +66,10 @@ class Logger:
         # Resolved ONCE, when with_retention() built this logger. The date it
         # implies cannot live in the bindings — see _emit.
         self._retention_policy = retention_policy
+        # Names of transports that receive the entry unmasked. Validated at
+        # init() against the configured pool; empty means the unmasked entry is
+        # never built at all.
+        self._exempt_transports = exempt_transports
 
     # ------------------------------------------------------------------
     # Fluent API
@@ -83,6 +89,7 @@ class Logger:
             on_log_failure=self._on_log_failure,
             retention=self._retention,
             retention_policy=self._retention_policy,
+            exempt_transports=self._exempt_transports,
         )
 
     def with_meta(self, payload: Dict[str, Any]) -> "Logger":
@@ -193,19 +200,40 @@ class Logger:
             if ends is not None:
                 entry["retention_until"] = retention_window.to_iso(ends)
 
-        # Apply masking, then the injection boundary (strip ANSI/control chars)
-        if self._masking:
-            entry = self._masking.process(entry)
-        entry = clean_tree(entry)
+        # Masking, then the injection boundary (strip ANSI/control chars).
+        masked = self._masking.process(entry) if self._masking else entry
+        masked = clean_tree(masked)
+
+        # The unmasked line is built ONLY when a sink is declared exempt, so the
+        # feature costs nothing when unused. Exempt skips masking and nothing
+        # else: the matrix already filtered the context above, and the sanitizer
+        # runs here too — an audit ledger still must not receive ANSI escapes.
+        unmasked = clean_tree(entry) if self._exempt_transports else None
 
         if self._stats is not None:
             self._stats.incr_logs_processed()
 
         for transport in self._transports:
             try:
-                transport.log(entry)
+                transport.log(self._entry_for(transport, masked, unmasked))
             except Exception as exc:
                 self._report_transport_failure(exc, transport)
+
+    def _entry_for(
+        self, transport: "Transport", masked: Dict[str, Any], unmasked: Optional[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """Which of the two lines this sink gets. Guard clauses; decides nothing else.
+
+        The identity check lives HERE, in the logger, where the transport is
+        known — never inside a transport, which must not be able to exempt
+        itself. The first guard is also what keeps the cost at zero when nobody
+        declared an exemption: no name is even computed.
+        """
+        if unmasked is None:
+            return masked
+        if transport_name(transport) not in self._exempt_transports:
+            return masked
+        return unmasked
 
     def _report_transport_failure(self, exc: BaseException, transport: "Transport") -> None:
         """Silent Observer: a broken transport never takes the app down —

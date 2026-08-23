@@ -13,7 +13,7 @@ import datetime
 import inspect
 import json
 import sys
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, FrozenSet, Optional
 
 # ---------------------------------------------------------------------------
 # ANSI codes — no external dependencies
@@ -57,8 +57,61 @@ def _format_clock(timestamp: Any) -> str:
     return ""
 
 
+class UnknownExemptTransportError(ValueError):
+    """
+    `masking.exempt_transports` names a transport that is not configured.
+
+    Fail-loud on purpose, at init(). Exempting a transport REMOVES masking from
+    it, so a typo would leave the audit sink masked — silently, and exactly where
+    the truth was required. That is not something to warn about and continue.
+    """
+
+    def __init__(self, unknown, known) -> None:
+        self.unknown = tuple(sorted(unknown))
+        self.known = tuple(sorted(known))
+        super().__init__(
+            "masking.exempt_transports names unknown transport(s): [{}]. "
+            "Configured transports: [{}]. A transport is named by its `name` "
+            "attribute, or by its class name when it has none.".format(
+                ", ".join(self.unknown), ", ".join(self.known)
+            )
+        )
+
+
+def transport_name(transport: Any) -> str:
+    """How a transport is addressed in config: its `name`, or its class name.
+
+    Duck-typed on purpose — anything with a `log()` is a transport here, so this
+    reads an attribute instead of requiring a base class.
+    """
+    return getattr(transport, "name", None) or type(transport).__name__
+
+
+def resolve_exempt_transports(names, pool) -> FrozenSet[str]:
+    """Validate the declared exemptions against the configured transports. Pure.
+
+    Returns a frozen set — empty when nothing is declared, which is the signal
+    the logger uses to skip building an unmasked entry at all.
+    """
+    if not names:
+        return frozenset()
+    known = {transport_name(t) for t in pool}
+    unknown = [n for n in names if n not in known]
+    if unknown:
+        raise UnknownExemptTransportError(unknown, known)
+    return frozenset(names)
+
+
 class Transport:
-    """Base transport. Override log() in subclasses."""
+    """Base transport. Override log() in subclasses.
+
+    Set `self.name` if the app config needs to address this instance — several
+    adapters of the same class, or a sink listed in `masking.exempt_transports`.
+    Without one, the class name is the name.
+    """
+
+    #: Overridden per instance when a transport needs to be addressable by name.
+    name = ""
 
     def log(self, entry: Dict[str, Any]) -> None:
         raise NotImplementedError
@@ -216,7 +269,7 @@ class AdapterTransport(Transport):
         adapter: UniversalAdapter,
         formatter: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None,
     ) -> None:
-        self._name = name
+        self.name = name
         self._adapter = adapter
         self._formatter = formatter
 

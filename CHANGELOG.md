@@ -6,6 +6,43 @@ All notable changes to slpy are documented here.
 
 ## [Unreleased]
 
+### Added — masking exemption per sink: the audit ledger gets the truth
+
+Masking runs once, before the transport loop, so until now every sink received the same redacted
+entry. That is right for consoles and APMs and wrong for exactly one: the compliance ledger, where
+`j***@example.com` proves nothing.
+
+```python
+audit = AdapterTransport(name='audit-journal', adapter=UniversalAdapter(executor=to_ledger))
+await slpy.init({
+    'logger':  {'transports': [ConsoleTransport(), audit]},
+    'masking': {'exempt_transports': ['audit-journal']},
+})
+```
+
+A transport is addressed by its `name`, or by its class name when it has none — `transport_name()`
+reads an attribute rather than requiring a base class, because slpy's transports are duck-typed and
+plenty of real ones (including every sink in this repo's own tests) inherit nothing.
+
+**Declared in app config, never by a transport about itself.** The check lives in the logger, where
+the sink's identity is known; a transport has no way to ask for it. There is a test whose sink sets
+`exempt_from_masking = True` and gets masked anyway. An unknown name raises
+`UnknownExemptTransportError` at `init()` and lists the configured transports: exempting a sink
+removes masking from it, so a typo would leave the audit ledger masked — silently, exactly where
+the truth was required. Forgetting the key masks the sink, which errs safe.
+
+**It skips masking and nothing else.** The Logging Matrix has already decided which context fields
+exist, and the sanitizer still runs on the exempt line — an audit ledger must not receive ANSI
+escapes either, because a forged log line is a forged log line whether or not the values are
+masked. Both pinned by test.
+
+**Cost when unused is zero,** and the proof is object identity rather than a benchmark: with no
+exemption declared, every sink receives the same entry object, because the second projection is
+never built.
+
+`AdapterTransport`'s name is now public (`transport.name`, was `_name`) — it is how config
+addresses the sink.
+
 ### Added — `retention_until`, the compliance window materialized at write time
 
 An entry tagged with a retention policy now also carries the date its window ends, so a purge is an

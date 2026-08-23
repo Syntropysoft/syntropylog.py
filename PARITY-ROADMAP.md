@@ -195,23 +195,30 @@ something Python has done well for many years, not by building new machinery.
       **`resolve()` stayed quiet** rather than becoming the loud form as sl4n spells it: slpy
       already shipped it returning `None`, and making the same call throw is the worst kind of
       break. The loud one is `require()`.
-- [ ] **Masking exemption per sink** — the audit ledger is the one sink where `j***@example.com`
-      proves nothing. JS names transports in app config (`masking.exemptTransports`), validated at
-      `init()`, *never* declared by a transport about itself. Blocking prerequisite: slpy's
-      transports have no `name` (`transport.py:60`). Exempt skips masking and nothing else —
-      matrix and sanitizer still apply.
+- [x] **Masking exemption per sink** — DONE 2026-08-23. `masking.exempt_transports` names sinks
+      that receive the entry unmasked, validated at `init()` against the configured pool with
+      `UnknownExemptTransportError`. A transport is addressed by its `name` or its class name;
+      `transport_name()` reads an attribute rather than requiring a base class, because slpy's
+      transports are duck-typed and the tests' own sinks do not inherit anything. The check lives
+      in the logger, where identity is known — a sink cannot exempt itself, pinned by a test whose
+      sink sets `exempt_from_masking = True` and is masked anyway. Exempt skips masking and nothing
+      else: matrix and sanitizer still apply, both pinned. Cost when unused is zero, and the proof
+      is object identity — with no exemption every sink receives the same entry object.
 - [x] **Two contract decisions** — DECIDED 2026-08-23 (Gabriel). (a) An unregistered name
       **raises**, like JS — from `with_retention()`, where the logger is built, so logging still
       cannot throw and there is a test that says so. (b) The emitted label is the **registered
       spelling**; lookup stays case-insensitive. Both tests that pinned the opposite were rewritten
       to pin the new contract.
-- [ ] **`docs/` describes a library that does not exist** — `data_masking.md`, `lifecycle.md` and
-      `logger_matrix.md` predate the refactor and document 11 facade methods that were never
-      implemented in the shipped package (`add_masking_rule`, `mask_data`, `get_masking_stats`,
-      `add_shutdown_handler`, `get_status`, `add_context`, `add_context_with_matrix`,
-      `configure_logger_matrix`, module-level `info`/`debug`/`error`), plus a flatten/unflatten
-      architecture the engine does not use. Banner added 2026-08-23 so no reader is misled;
-      rewrite-or-delete is still a decision. `slpy-refactor-plan.md` is historical and stays.
+- [ ] **Rewrite `docs/`** — `data_masking.md`, `lifecycle.md` and `logger_matrix.md` predate the
+      refactor and document 11 facade methods that were never in the shipped package
+      (`add_masking_rule`, `mask_data`, `get_masking_stats`, `add_shutdown_handler`, `get_status`,
+      `add_context`, `add_context_with_matrix`, `configure_logger_matrix`, module-level
+      `info`/`debug`/`error`), plus a flatten/unflatten architecture the engine does not use.
+      **Decision (Gabriel, 2026-08-23): they stay, bannered, and get rewritten** — not deleted.
+      sl4n dropped its equivalents because `docs/` does not travel inside a nupkg, so nobody was
+      reading them; here the repo itself is read, and PyPI ships the README. Banner added
+      2026-08-23 so no reader is misled in the meantime. `slpy-refactor-plan.md` is historical and
+      stays as-is.
 - [ ] **`llms.txt`** — the compact API contract for code-generating agents, like the JS and .NET
       siblings ship. Deliberately last: writing it before the 2.0.0 surface settles means writing
       it twice.

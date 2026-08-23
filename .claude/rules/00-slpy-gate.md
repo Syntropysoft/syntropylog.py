@@ -110,6 +110,12 @@ entero — y ahí `mask_char` **también** se ignora, a propósito.
 publicaron. Llevan banner desde 2026-08-23. Fuente correcta hoy: `README.md` y el código.
 `slpy-refactor-plan.md` es histórico y se queda.
 
+**La exención de masking se declara en la config de la app, nunca en el transport.** El chequeo
+vive en `Logger._entry_for`, donde se conoce la identidad del sink; un transport no tiene forma de
+pedirla. ❌ NEVER mover esa decisión adentro de un transport ni de un adapter. Un nombre inexistente
+en `masking.exempt_transports` **revienta en `init()`** — olvidarse la clave enmascara, que es el
+error seguro. La exención saltea el masking y **nada más**: matrix y sanitizer siguen aplicando.
+
 **Retención: la fecha se calcula al emitir, nunca al bindear.** `with_retention()` devuelve un
 logger; si `retention_until` viviera en los bindings, un logger armado al arranque estamparía la
 misma fecha para siempre. Se computa en `_emit`, del **mismo** `datetime.now()` que da el

@@ -41,6 +41,9 @@ class MaskingConfig:
     max_depth: int = 10
     # Called when masking fails (never receives the raw payload). Never raises.
     on_masking_error: Optional[Any] = None
+    # Transports that receive the entry UNMASKED, by name. Declared here, in app
+    # config — never by a transport about itself. An unknown name fails at init().
+    exempt_transports: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -82,6 +85,7 @@ class ConfigManager:
                 rules=masking_raw.get("rules", []),
                 max_depth=masking_raw.get("max_depth", 10),
                 on_masking_error=masking_raw.get("on_masking_error"),
+                exempt_transports=masking_raw.get("exempt_transports", []),
             ),
             observability=ObservabilityConfig(
                 transports=obs_raw.get("transports", []),

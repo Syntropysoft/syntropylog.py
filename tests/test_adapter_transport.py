@@ -95,7 +95,7 @@ def test_adapter_transport_name():
         name="my-transport",
         adapter=UniversalAdapter(executor=lambda d: None),
     )
-    assert transport._name == "my-transport"
+    assert transport.name == "my-transport"   # public: the app config addresses it
 
 
 # ---------------------------------------------------------------------------

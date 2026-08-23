@@ -24,7 +24,9 @@ Quick start:
 
 from .core import SyntropyLog
 from .durable import DurableFileTransport
-from .transport import Transport, ConsoleTransport, PrettyConsoleTransport, UniversalAdapter, AdapterTransport
+from .transport import (AdapterTransport, ConsoleTransport, PrettyConsoleTransport,
+                        Transport, UniversalAdapter, UnknownExemptTransportError,
+                        transport_name)
 from .masking import (MASK_KEYS, MaskingEngine, MaskingRule, MaskingStrategy,
                       mask_pattern, strategy_to_spec)
 from .mask_spec import REDACTED, MaskSpec, apply_mask
@@ -47,6 +49,8 @@ __all__ = [
     "PrettyConsoleTransport",
     "UniversalAdapter",
     "AdapterTransport",
+    "UnknownExemptTransportError",
+    "transport_name",
     "DurableFileTransport",
     "MaskingEngine",
     "MaskingRule",

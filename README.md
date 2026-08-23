@@ -306,6 +306,33 @@ from slpy import MASK_KEYS, mask_pattern
 }
 ```
 
+**One sink can be exempt: the audit ledger.** Masking runs once, before the transport loop, so
+every sink gets the same redacted entry — right for consoles and APMs, wrong for the compliance
+ledger, where `j***@example.com` proves nothing.
+
+```python
+audit = AdapterTransport(name='audit-journal', adapter=UniversalAdapter(executor=to_ledger))
+
+await slpy.init({
+    'logger':  {'transports': [ConsoleTransport(), audit]},
+    'masking': {'exempt_transports': ['audit-journal']},
+})
+# console      → email: "j***@example.com"
+# audit-journal → email: "john@example.com"
+```
+
+A transport is addressed by its `name`, or by its class name when it has none. The exemption is
+**declared in app config, never by a transport about itself** — the check lives in the logger,
+where the sink's identity is known. An unknown name raises `UnknownExemptTransportError` at
+`init()`: exempting a transport removes masking from it, so a typo would leave the audit sink
+masked, silently, exactly where the truth was required. Forgetting the key masks the sink, which
+errs safe.
+
+It skips masking and **nothing else**. The Logging Matrix already decided which context fields
+exist, and the sanitizer still runs — a forged log line is a forged log line whether or not the
+values are masked. Both are pinned by test. Cost when unused is zero: the second entry is built
+only if a sink is declared exempt.
+
 **Failsafe.** Masking never throws. If it fails, the failure is counted (`get_stats().masking_failures`), reported through the optional `masking.on_masking_error` hook (which never receives the raw payload), and the entry degrades to a safe payload — `level`/`timestamp`/`message`/`service` plus `_masking_failed: True`. **The raw metadata never leaks.** Rules only ever run against field names (capped at 256 chars), never values — bounded input, bounded regex evaluation.
 
 ---
