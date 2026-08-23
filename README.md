@@ -531,6 +531,35 @@ It is the component that makes every log line correct, consistent, and safe befo
 
 ---
 
+## Working on slpy
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -e '.[dev,fastapi]' httpx maturin
+.venv/bin/maturin build --release -m slpy-native/Cargo.toml -i .venv/bin/python
+.venv/bin/pip install --force-reinstall slpy-native/target/wheels/*.whl
+git config core.hooksPath .githooks
+```
+
+`pytest` alone is not the full gate. Without the optional dependencies the suite reports
+`skipped` for the fourteen tests that compare the Rust and Python masking engines — the ones that
+exist to catch the two engines drifting apart — plus the FastAPI middleware. With everything
+installed there are **no skips**, and that is what CI enforces.
+
+The hooks run the same gate before a commit lands, and catch one thing CI would only catch later:
+if you edit `slpy-native/src` and do not rebuild, the suite still passes — against the previous
+wheel. The parity tests would be asserting the old binary while your change looks verified.
+
+| | pre-commit |
+| :-- | :-- |
+| on `main` | refuses (`SLPY_ALLOW_MAIN=1` to override) |
+| `slpy-native/src` staged | `cargo check`, then refuses if the installed wheel is older than the source |
+| always | the suite, and it names which optional dependency is missing rather than passing quietly |
+
+Set `SLPY_PYTHON` if your environment is somewhere other than `.venv`.
+
+---
+
 ## Documentation & examples
 
 - **[Data masking](docs/data_masking.md)** · **[Logging matrix](docs/logger_matrix.md)** · **[Lifecycle](docs/lifecycle.md)** · **[Architecture & design decisions](docs/slpy-refactor-plan.md)**
