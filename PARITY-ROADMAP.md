@@ -143,6 +143,14 @@ is a failed job.
 
 ## Python salvedades (intentional — keep them)
 
+- **A policy declaring more than one unit refuses to start**, where the Node reference lets `years`
+  win. JS is lenient for a reason specific to its history: `months` had been an unread key, so
+  refusing would have *removed* a date from records that already got one, and taking a compliance
+  date away in a minor is worse than resolving an ambiguity the way it had always resolved. In slpy
+  both units arrived together in the same release, no config can be carrying both by accident, and
+  there is nothing to preserve — so the safer reading wins, the same one sl4n took. Divergence from
+  the reference, recorded here per the repo's own rule.
+
 - **`SerializationManager` and `BrokerManager` were deliberately removed** in the slpy refactor
   ("over-engineered / integration layer, not core" — see `docs/slpy-refactor-plan.md`). Their
   absence is a decision, not drift. `get_propagation_headers()` is the kept broker primitive.
@@ -176,22 +184,27 @@ something Python has done well for many years, not by building new machinery.
       older wheel makes slpy fall back to the Python engine instead of silently masking by other
       rules. `preserve_length` went from dead config to live. 252 tests green, 0 skipped;
       209 green on CPython 3.7.
-- [ ] **Retention to JS 2.1.0** — `months`/`years` on `RetentionPolicy`; a pure
-      `retention_window` module (roll forward on a short month, `date.replace()` raises on 31-Feb
-      so it must be explicit); `retention_until` stamped **in `_emit`** from the entry timestamp,
-      never in the bindings; registry copied and frozen (`MappingProxyType`); `policies`,
-      a loud `resolve()` with `RetentionPolicyNotFoundError`, `try_resolve()`, `until(name, at)`;
-      more than one unit declared → refuse to start. Drop `2555` from every example
-      (`retention.py`, `config.py`, `README.md`) — it is 7 × 365 and misses two leap days.
+- [x] **Retention to JS 2.1.0** — DONE 2026-08-23. `months`/`years` on `RetentionPolicy`; the pure
+      `slpy/retention_window.py` (roll forward on a short month — `date.replace()` cannot even
+      express 31-Feb, so the roll is explicit); `retention_until` computed in `_emit` from the
+      entry's own instant, from the same clock read as `timestamp`, and written after the kwargs
+      so a caller cannot hand-write a compliance date; registry copied and frozen
+      (`MappingProxyType`); `policies`, `require()` with `RetentionPolicyNotFoundError`,
+      `until(name, at)` anchored in UTC, and the pure `retention_until` exported. `2555` is gone
+      from every example that taught it, and survives only in the test that pins the drift.
+      **`resolve()` stayed quiet** rather than becoming the loud form as sl4n spells it: slpy
+      already shipped it returning `None`, and making the same call throw is the worst kind of
+      break. The loud one is `require()`.
 - [ ] **Masking exemption per sink** — the audit ledger is the one sink where `j***@example.com`
       proves nothing. JS names transports in app config (`masking.exemptTransports`), validated at
       `init()`, *never* declared by a transport about itself. Blocking prerequisite: slpy's
       transports have no `name` (`transport.py:60`). Exempt skips masking and nothing else —
       matrix and sanitizer still apply.
-- [ ] **Two contract decisions, still open** — (a) an unregistered policy name: stamp and continue
-      (today, pinned by `test_stamp_unregistered_name_still_travels`) or raise like JS; (b) the
-      label a policy travels under: emit the registered canonical name, or make the lookup
-      case-sensitive. Both change a test that currently pins the opposite.
+- [x] **Two contract decisions** — DECIDED 2026-08-23 (Gabriel). (a) An unregistered name
+      **raises**, like JS — from `with_retention()`, where the logger is built, so logging still
+      cannot throw and there is a test that says so. (b) The emitted label is the **registered
+      spelling**; lookup stays case-insensitive. Both tests that pinned the opposite were rewritten
+      to pin the new contract.
 - [ ] **`docs/` describes a library that does not exist** — `data_masking.md`, `lifecycle.md` and
       `logger_matrix.md` predate the refactor and document 11 facade methods that were never
       implemented in the shipped package (`add_masking_rule`, `mask_data`, `get_masking_stats`,

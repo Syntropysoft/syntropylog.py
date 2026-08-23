@@ -6,6 +6,74 @@ All notable changes to slpy are documented here.
 
 ## [Unreleased]
 
+### Added — `retention_until`, the compliance window materialized at write time
+
+An entry tagged with a retention policy now also carries the date its window ends, so a purge is an
+indexable range scan (`WHERE retention_until < CURRENT_DATE`) instead of a computed expression, and
+records filed under an older revision of a policy keep the window that was in force when they were
+written. It is **not** an expiry: reaching it ends the obligation, it does not authorize deletion.
+
+`RetentionPolicy` gained **`months`** and **`years`** alongside `days`. Declare exactly one — a
+policy declaring two **refuses to start**, raising `RetentionConfigurationError` while the registry
+is built, never from the logging path. An ambiguous compliance window has no safe default, and a
+host that will not boot beats records swept on a date nobody chose. (The Node reference is lenient
+here and lets `years` win, for a reason that is specific to its history: `months` was an unread key
+in existing configs, so refusing would have *removed* a date from records that already got one. In
+slpy both units are new, so no config can be carrying both by accident, and there is nothing to
+preserve. Recorded as a deliberate divergence in `PARITY-ROADMAP.md`.)
+
+**The arithmetic rounds long, on purpose.** 31-Jan plus one month has no 31-Feb to land on. Clamping
+back to 28-Feb — what most date libraries do — ends the window up to three days early, the exact
+failure retention exists to prevent, so slpy rolls forward to 3-Mar; 29-Feb plus a year lands on
+1-Mar. Pinned across every short month and both leap-day cases.
+
+**Anchored to the entry's own timestamp, not to when the logger was built.** `with_retention()`
+returns a logger, and a logger built at startup would otherwise stamp the same date on records
+written months later. The date is computed in `_emit` from the same instant the entry's `timestamp`
+comes from — one clock read per entry, so the two can never disagree — and written after your
+kwargs, because the framework owns this field and a caller must not be able to hand-write the date
+a compliance sweep will read.
+
+Emitted as an ISO `YYYY-MM-DD` string, never a `date` object, so no transport can format it by the
+server's locale.
+
+`retention_days` now travels **only when the policy is declared in days**. A policy declared in
+years has no day count and slpy will not invent one — the materialized date is what such a policy
+carries.
+
+### Added — resolving a policy without going through a logger
+
+A domain write path that persists retention in its own column now gets the same answer the logger
+stamps, from the same registry and the same arithmetic. `RetentionRegistry` gained:
+
+- `policies` — every policy, frozen, keyed by canonical name.
+- `require(name)` — the policy, or `RetentionPolicyNotFoundError` carrying the sorted registered
+  names. `resolve(name)` keeps returning `None` and is unchanged: making an existing call throw
+  would be the worst kind of break — same name, same signature, different failure mode.
+- `until(name, at)` — the same date the logging path stamps, anchored in UTC (an aware datetime is
+  converted first: a record written at 21:00 in UTC-5 belongs to the next UTC day, and the two
+  answers have to agree).
+- `retention_until(at, policy)` is exported as the pure function underneath.
+
+**The registry is now genuinely frozen.** It copied nothing before: the dict you passed to the
+constructor stayed live, so editing it afterwards redefined a compliance window for records already
+written under the old one. It now copies on construction and exposes a `MappingProxyType`; both
+routes have a test.
+
+### Changed (breaking) — retention contract
+
+- **An unregistered policy name now raises** `RetentionPolicyNotFoundError` instead of stamping the
+  name and continuing. It raises from `with_retention()` — where the logger is built, once, at
+  wiring time — and **never from a log call**: the promise that logging cannot throw is unchanged,
+  and there is a test that says so. A typo that travelled silently was a record persisted with no
+  retention at all, discovered at audit time rather than at deploy time.
+- **The emitted name is the registered spelling.** Lookup stays case-insensitive, but `resolve()`
+  lowercased while `stamp()` echoed whatever the caller typed, so one policy could travel as
+  `SOX_AUDIT` on some records and `sox_audit` on others. Everything downstream — Loki label
+  matchers, index filters, a sweep's `WHERE` clause — matches an exact low-cardinality string, so a
+  sweep on one spelling found half the records.
+- **`retention_days` is omitted for policies not declared in days** (see above).
+
 ### Changed (breaking) — masked values now match the rest of the family
 
 **What a masked value looks like changes for all five built-in strategies.** slpy's masking was

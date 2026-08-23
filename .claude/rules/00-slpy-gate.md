@@ -110,6 +110,20 @@ entero — y ahí `mask_char` **también** se ignora, a propósito.
 publicaron. Llevan banner desde 2026-08-23. Fuente correcta hoy: `README.md` y el código.
 `slpy-refactor-plan.md` es histórico y se queda.
 
+**Retención: la fecha se calcula al emitir, nunca al bindear.** `with_retention()` devuelve un
+logger; si `retention_until` viviera en los bindings, un logger armado al arranque estamparía la
+misma fecha para siempre. Se computa en `_emit`, del **mismo** `datetime.now()` que da el
+`timestamp` (una sola lectura de reloj por entrada), y **después** de los kwargs: el campo es del
+framework y un caller no puede escribir a mano la fecha que va a leer un barrido de compliance.
+
+**El redondeo alarga, nunca acorta.** 31-ene + 1 mes → 3-mar, no 28-feb. Clampear hacia atrás
+termina la ventana antes, que es justo el fallo que la retención existe para evitar. ❌ NEVER usar
+`date.replace(month=...)`: revienta con un día inexistente y no puede expresar el roll.
+
+**`with_retention()` con un nombre no registrado LEVANTA** (`RetentionPolicyNotFoundError`), pero
+`_emit` sigue sin poder tirar nunca — la promesa está fijada por `test_logging_still_cannot_raise`.
+La grafía que viaja es siempre la **registrada**, aunque el lookup sea case-insensitive.
+
 **Config de pytest desduplicada** (2026-08-23): `pytest.ini` es la única fuente; el bloque
 `[tool.pytest.ini_options]` de `pyproject.toml` era config muerta y se borró.
 

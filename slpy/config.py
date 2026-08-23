@@ -51,7 +51,9 @@ class Config:
     observability: ObservabilityConfig = field(default_factory=ObservabilityConfig)
     # Per-level whitelist of context fields: {'default': [...], 'info': [...], 'error': ['*']}
     logging_matrix: Dict[str, List[str]] = field(default_factory=dict)
-    # Named retention policies: {'SOX_AUDIT_TRAIL': {'days': 2555, 'class': 'SOX'}}
+    # Named retention policies: {'SOX_AUDIT_TRAIL': {'years': 7, 'class': 'SOX'}}
+    # Exactly one unit per policy — days | months | years. Prefer the calendar
+    # unit: 2555 days is 7 x 365 and ends two days before seven actual years.
     retention_policies: Dict[str, Any] = field(default_factory=dict)
 
 

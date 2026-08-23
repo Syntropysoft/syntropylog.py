@@ -104,9 +104,19 @@ def test_non_json_values_are_stringified_not_lost(tmp_path):
 
 
 def test_iso_timestamp_format():
+    """The family timestamp format, from an explicit instant.
+
+    `_iso_timestamp` takes the instant now instead of reading the clock: the
+    logger reads it once per entry and derives both the timestamp and the
+    retention window from the same value, so the two can never disagree.
+    """
+    from datetime import datetime, timezone
+
     from slpy.logger import _iso_timestamp
-    ts = _iso_timestamp()
-    from datetime import datetime
+
+    at = datetime(2026, 7, 9, 14, 0, 0, 123456, tzinfo=timezone.utc)
+    ts = _iso_timestamp(at)
+    assert ts == "2026-07-09T14:00:00.123+00:00"
     parsed = datetime.fromisoformat(ts)
     assert parsed.tzinfo is not None
     assert "." in ts    # millisecond precision present

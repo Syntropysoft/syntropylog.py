@@ -317,20 +317,63 @@ Declare named policies once; tag loggers with `with_retention(name)`; every tagg
 ```python
 await slpy.init({
     'retention_policies': {
-        'SOX_AUDIT_TRAIL': {'days': 2555, 'class': 'SOX'},   # 7 years
-        'GDPR_ACCESS':     {'days': 90,   'class': 'GDPR'},
+        'SOX_AUDIT_TRAIL': {'years': 7,  'class': 'SOX'},
+        'BCRA_A7724':      {'months': 42, 'class': 'BCRA'},
+        'GDPR_ACCESS':     {'days': 90,  'class': 'GDPR'},
     },
 })
 
 audit = slpy.get_logger('payments').with_retention('SOX_AUDIT_TRAIL')
 audit.audit('Manager override', user_id='u-1')
-# → retention: "SOX_AUDIT_TRAIL"  retention_class: "SOX"  retention_days: 2555
+# → retention: "SOX_AUDIT_TRAIL"  retention_class: "SOX"  retention_until: "2033-08-23"
 ```
 
+**`retention_until` is the point.** The date the mandatory window ends, materialized when the entry
+is written, so a sweep is an indexable range scan — `WHERE retention_until < CURRENT_DATE` — instead
+of a policy interpretation. It also means a record filed under an older revision of a policy keeps
+the window that was in force when it was written. It is **not** an expiry: reaching it ends the
+obligation, it does not authorize deletion.
+
+**Declare exactly one unit,** and prefer the calendar one. `days` is exact but drifts: `2555` is
+7 × 365, misses two leap days, and ends the window two days before seven actual years. A policy
+declaring more than one unit **refuses to start** — an ambiguous compliance window has no safe
+default, and a host that will not boot beats records swept on a date nobody chose.
+
+**The rounding errs long, never short.** 31-Jan plus one month has no 31-Feb to land on, so it rolls
+forward to 3-Mar rather than clamping back to 28-Feb; 29-Feb plus a year lands on 1-Mar. Ending a
+window early is the failure an auditor punishes; a record kept a day too long costs storage.
+
 - The stamped fields are **never filtered by the Logging Matrix** — they are bindings, not context.
-- An unregistered name still stamps `retention` — compliance intent is never silently dropped.
-- Inline policies work without a registry entry: `with_retention({'days': 30, 'class': 'PCI'})`.
+  `retention_until` is written per entry, after your kwargs: a caller cannot hand-write the date a
+  compliance sweep will read.
+- **An unregistered name raises** `RetentionPolicyNotFoundError`, with the registered names listed.
+  It raises from `with_retention()` — where you build the logger, once — never from a log call:
+  logging still cannot throw. A typo that travelled silently would be a record with no retention at
+  all, found at audit time.
+- Lookup is case-insensitive, but the field always carries the **registered spelling**. Downstream
+  matches an exact string, so one policy must not arrive as `SOX_AUDIT` on some records and
+  `sox_audit` on others.
+- Inline policies work without a registry entry: `with_retention({'months': 6, 'class': 'PCI'})`.
+  They have no name to route on, so nothing lands in `retention` — the window is still computed.
 - Composes with the rest of the fluent API: `logger.child(...).with_retention(...).with_meta(...)`.
+
+**Resolving outside the logger** — for a domain write path that persists retention in its own
+column, and needs the same answer the log gets:
+
+```python
+registry = slpy._retention                       # or build your own RetentionRegistry
+registry.policies                                # every policy, frozen, by canonical name
+registry.resolve('SOX_AUDIT_TRAIL')              # the policy, or None
+registry.require('SOX_AUDIT_TRAIL')              # the policy, or RetentionPolicyNotFoundError
+registry.until('SOX_AUDIT_TRAIL', written_at)    # the same date the logger stamps
+
+from slpy import retention_until                 # the pure function underneath
+retention_until(date(2026, 1, 31), RetentionPolicy(months=1))   # → date(2026, 3, 3)
+```
+
+The registry is frozen: it copies on construction and hands out a read-only view, so neither the
+dict you passed in nor the view you get back can redefine a window for records already written
+under the old one.
 
 Pair it with `DurableFileTransport` (below) so tagged entries are also *delivered* with guarantees.
 
