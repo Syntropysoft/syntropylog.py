@@ -38,10 +38,6 @@ Issues = "https://github.com/Syntropysoft/syntropylog.py/issues"
 fastapi = ["fastapi>=0.100.0"]
 dev = ["pytest>=7.0.0", "pytest-asyncio>=0.21.0", "pytest-cov>=4.0.0"]
 
-[tool.pytest.ini_options]
-asyncio_mode = "auto"
-testpaths = ["tests"]
-
 [tool.setuptools.packages.find]
 include = ["slpy", "slpy.*"]
 

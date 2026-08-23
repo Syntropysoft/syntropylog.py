@@ -1,0 +1,6 @@
+#!/usr/bin/env sh
+# Gate de commit: rama correcta + suite verde.
+. "$(dirname "$0")/_gate.sh"
+
+refuse_on_main
+gate_tests
