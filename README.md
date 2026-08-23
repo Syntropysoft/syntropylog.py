@@ -643,6 +643,15 @@ Set `SLPY_PYTHON` if your environment is somewhere other than `.venv`.
 
 ---
 
+## For coding agents
+
+`llms.txt` at the repo root is the compact API contract — the whole config shape, the emitted entry,
+every error and when it is raised, and the mistakes that are easy to make from memory. Every claim
+in it is pinned by `tests/test_llms_contract.py`, so it cannot drift from the code without the
+suite going red.
+
+---
+
 ## Documentation & examples
 
 - **[Data masking](docs/data_masking.md)** · **[Logging matrix](docs/logger_matrix.md)** · **[Lifecycle](docs/lifecycle.md)** · **[Architecture & design decisions](docs/slpy-refactor-plan.md)**

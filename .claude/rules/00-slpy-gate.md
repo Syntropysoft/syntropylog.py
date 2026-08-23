@@ -71,7 +71,12 @@ replicado dentro del hook del repo y no se asume de afuera.
 - ❌ NEVER divergir del modelo de la referencia Node sin registrarlo en `PARITY-ROADMAP.md`.
 - ❌ NEVER que un fallo de logging escape al caller.
 - ❌ NEVER romper `>=3.7`: es el piso declarado y es viejo a propósito.
-- ✅ ALWAYS mantener `py.typed` (declarado en `package-data`) — el paquete promete tipos.
+- ✅ ALWAYS mantener `py.typed` (el archivo `slpy/py.typed` **y** su declaración en `package-data`).
+  Estuvo declarado sin existir hasta 2026-08-23: 1.0.0 salió sin el marcador PEP 561. Lo fija
+  `test_the_py_typed_marker_exists`.
+- ✅ ALWAYS que un cambio de superficie se refleje en `llms.txt` **y** en
+  `tests/test_llms_contract.py`. Ese archivo es el contrato que lee un agente: si el test falla, o
+  el código regresó o el documento quedó viejo — nunca se ajusta el test para que pase.
 - ❌ NEVER mezclar cálculo y efecto cuando se pueden separar. ✅ ALWAYS la **decisión** en una
   función pura a nivel módulo (`apply_mask`, `strategy_to_spec`, `_mask_tree`, `RetentionRegistry.stamp`)
   y el **efecto** — escribir al transport, tocar un contador — en el borde que la llama. Guard

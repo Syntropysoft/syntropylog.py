@@ -38,8 +38,10 @@ _REQUIRED_ENGINE_API = 2
 _native: Any = None
 if os.environ.get("SLPY_NATIVE_DISABLE", "").strip() not in ("1", "true", "yes"):
     try:
-        from slpy_native import ENGINE_API as _NATIVE_API
-        from slpy_native import NativeMaskingEngine as _NativeMaskingEngine
+        from slpy_native import ENGINE_API as _NATIVE_API  # type: ignore[import-not-found]
+        from slpy_native import (  # type: ignore[import-not-found]
+            NativeMaskingEngine as _NativeMaskingEngine,
+        )
         if _NATIVE_API == _REQUIRED_ENGINE_API:
             _native = _NativeMaskingEngine
     except ImportError:

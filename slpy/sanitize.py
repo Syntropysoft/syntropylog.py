@@ -60,6 +60,6 @@ def clean_tree(value: Any, depth: int = 10) -> Any:
         cleaned = {k: clean_tree(v, depth - 1) for k, v in value.items()}
         return value if all(cleaned[k] is value[k] for k in value) else cleaned
     if isinstance(value, list):
-        cleaned = [clean_tree(v, depth - 1) for v in value]
-        return value if all(a is b for a, b in zip(cleaned, value)) else cleaned
+        items = [clean_tree(v, depth - 1) for v in value]
+        return value if all(a is b for a, b in zip(items, value)) else items
     return value

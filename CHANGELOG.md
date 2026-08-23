@@ -6,6 +6,45 @@ All notable changes to slpy are documented here.
 
 ## [Unreleased]
 
+### Added — `llms.txt`, and it is asserted rather than asserted-to
+
+The compact API contract a code-generating agent reads, mirroring the Node and .NET siblings. A
+wrong line in it becomes wrong code in somebody else's repository, so every claim was checked
+against the source — and then the checks were kept: `tests/test_llms_contract.py` pins 44 of them.
+The document can no longer go stale in silence.
+
+What the tests pin is the set of things an agent gets wrong from memory: the method is `warn`, not
+`warning`; every facade call raises `RuntimeError` before `init()` and `is_initialized` is the only
+one that does not; the six default masking outputs exactly as printed; a configured matrix with no
+`default` drops all context on an unlisted level; `retention_days` is absent for a policy declared
+in years; the degraded payload after a masking failure is exactly five fields and leaks no
+metadata; and `SLPY_LOG_LEVEL` and `SLPY_NATIVE_DISABLE` are the only environment variables the
+package reads — that last one asserted over the whole package rather than claimed.
+
+It ships in the sdist. Not in the wheel: a wheel installs the package directory, and putting it
+there would mean a second copy that can drift from the one at the repo root. sl4n ships its copy
+inside the nupkg; this is the honest limitation of the Python packaging shape, stated rather than
+papered over.
+
+### Fixed — `py.typed` was declared and did not exist
+
+`pyproject.toml` has listed `slpy = ["py.typed"]` under `package-data` since the beginning, and the
+file was never created, so **1.0.0 shipped without the PEP 561 marker**. A type checker is entitled
+to ignore every annotation in a package without it — which, for a fully annotated codebase that
+advertises typing support, means the annotations were doing nothing for consumers who follow the
+spec strictly. The marker exists now, ships in both wheel and sdist, and a test pins both halves:
+the file is there, and it is still declared.
+
+Running a type checker over the package for the first time also turned up four real annotation
+defects, all fixed here: `RetentionRegistry.policies` was annotated `Dict` while returning a
+read-only `MappingProxyType` — the signature promised mutability the object refuses — and is now
+`Mapping`; `PrettyConsoleTransport(colors: bool = None)` had a default its own annotation rejected,
+now `Optional[bool]`; `clean_tree` bound one name to both a dict and a list; and
+`_exempt_transports` had no annotation. What remains is thirteen reports of one pattern mypy
+cannot see through (`_require_initialized()` narrows the singleton's optional state, and mypy has
+no way to know), plus starlette imports that resolve once the `[fastapi]` extra is installed.
+Neither is a defect; both are recorded in `PARITY-ROADMAP.md` rather than silenced.
+
 ### Added — masking exemption per sink: the audit ledger gets the truth
 
 Masking runs once, before the transport loop, so until now every sink received the same redacted

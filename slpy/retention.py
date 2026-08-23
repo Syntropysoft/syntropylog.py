@@ -27,7 +27,7 @@ leap days, and ends two days before seven actual years.
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from types import MappingProxyType
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Dict, Mapping, Optional, Tuple, Union
 
 from . import retention_window
 
@@ -148,8 +148,10 @@ class RetentionRegistry:
         return cls(policies)
 
     @property
-    def policies(self) -> Dict[str, RetentionPolicy]:
-        """Every registered policy, keyed by its canonical name. Read-only."""
+    def policies(self) -> Mapping[str, RetentionPolicy]:
+        """Every registered policy, keyed by its canonical name. Read-only —
+        the return type says so: a `Mapping` has no mutators, and what comes
+        back is a `MappingProxyType` that refuses them at runtime too."""
         return MappingProxyType(
             {self._canonical.get(key, key): value for key, value in self._policies.items()}
         )

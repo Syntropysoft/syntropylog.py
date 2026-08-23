@@ -5,7 +5,7 @@ Lifecycle: await slpy.init(config) → use → await slpy.shutdown()
 """
 
 from contextlib import asynccontextmanager
-from typing import Any, Dict, Optional
+from typing import Any, Dict, FrozenSet, Optional
 
 from .config import ConfigManager
 from .context import ContextManager
@@ -37,7 +37,7 @@ class SyntropyLog:
         self._observability: Optional[ObservabilityEngine] = None
         self._loggers: Dict[str, Logger] = {}
         self._matrix: Optional[LoggingMatrix] = None
-        self._exempt_transports = frozenset()
+        self._exempt_transports: FrozenSet[str] = frozenset()
         self._stats: Optional[SlpyStats] = None
         self._retention: Optional[RetentionRegistry] = None
 

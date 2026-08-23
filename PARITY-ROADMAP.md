@@ -219,9 +219,27 @@ something Python has done well for many years, not by building new machinery.
       reading them; here the repo itself is read, and PyPI ships the README. Banner added
       2026-08-23 so no reader is misled in the meantime. `slpy-refactor-plan.md` is historical and
       stays as-is.
-- [ ] **`llms.txt`** — the compact API contract for code-generating agents, like the JS and .NET
-      siblings ship. Deliberately last: writing it before the 2.0.0 surface settles means writing
-      it twice.
+- [x] **`llms.txt`** — DONE 2026-08-23, deliberately last so it was written once. Every claim was
+      verified against the source, and the verification was kept as
+      `tests/test_llms_contract.py` (44 tests) instead of thrown away — the document cannot go
+      stale in silence. Ships in the sdist only: a wheel installs the package directory, and a
+      second copy under `slpy/` could drift from the canonical one at the repo root. sl4n ships
+      its copy inside the nupkg; this is the Python packaging shape, stated rather than hidden.
+
+- [x] **`py.typed` existed only in `pyproject.toml`** — FIXED 2026-08-23. Declared in
+      `package-data` from the start, never created, so 1.0.0 shipped with no PEP 561 marker and a
+      strict type checker was entitled to ignore every annotation in the package. Both halves are
+      now pinned by test. Found while packaging `llms.txt`.
+
+- [ ] **Type checking is not in the gate** — running mypy over the package for the first time
+      found four real annotation defects (fixed 2026-08-23: `policies` annotated `Dict` while
+      returning a read-only `MappingProxyType`, `colors: bool = None`, a name bound to both a dict
+      and a list in `clean_tree`, and an unannotated `_exempt_transports`). What remains is **13
+      reports of a single pattern**: `_require_initialized()` narrows the singleton's `Optional`
+      attributes and mypy cannot see it, so every access after it reads as `union-attr`. Fixing
+      that is a design change — a `_State` object built at `init()`, or asserts at each boundary —
+      and adding mypy to the gate is a "what blocks a commit" decision. Both are Gabriel's calls,
+      not drift.
 
 ### Standing backlog
 

@@ -156,7 +156,7 @@ class PrettyConsoleTransport(Transport):
         })
     """
 
-    def __init__(self, colors: bool = None) -> None:
+    def __init__(self, colors: Optional[bool] = None) -> None:
         """
         Args:
             colors: Force colors on (True) or off (False).

@@ -1,0 +1,13 @@
+# The sdist carries the documents an agent or a reader may want next to the code.
+# NOTE: this is sdist only. A wheel installs the package directory, so llms.txt does
+# NOT travel inside a `pip install` from a wheel — unlike sl4n, where it ships inside
+# the nupkg. Fixing that would mean a second copy under slpy/, and a duplicated file
+# that can drift is worse than the gap. The canonical copy lives at the repo root.
+include llms.txt
+include README.md
+include CHANGELOG.md
+include SECURITY.md
+include LICENSE
+include PARITY-ROADMAP.md
+include pytest.ini
+recursive-include tests *.py *.json
