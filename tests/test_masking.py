@@ -91,3 +91,67 @@ def test_no_default_rules():
     result = engine.process({"password": "visible", "email": "visible@example.com"})
     assert result["password"] == "visible"
     assert result["email"] == "visible@example.com"
+
+
+# ---------------------------------------------------------------------------
+# Decision cache (perf fix, 2026-07-11 — semantics must be identical).
+# The cache lives in the PYTHON engine; force that path (the Rust twin has its
+# own hot path and never consults it).
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def py_engine():
+    e = MaskingEngine(enable_default_rules=True)
+    e._native = None  # force the Python fallback the cache belongs to
+    return e
+
+
+def test_cache_repeat_calls_mask_identically(py_engine):
+    # The RULE is cached per key name — never the value.
+    assert py_engine.process({"email": "john@example.com"})["email"] == "j**n@example.com"
+    assert py_engine.process({"email": "anna@example.com"})["email"] == "a**a@example.com"
+    assert py_engine.process({"name": "John"})["name"] == "John"
+    assert py_engine.process({"name": "Anna"})["name"] == "Anna"
+    assert py_engine.decision_cache_size == 2  # email + name, one entry per key NAME
+
+
+def test_cache_covers_nested_keys(py_engine):
+    # slpy masks nested keys — the walk consults the cache at every depth.
+    result = py_engine.process({"user": {"email": "john@example.com", "name": "John"}})
+    assert result["user"]["email"] == "j**n@example.com"
+    assert result["user"]["name"] == "John"
+    assert py_engine.decision_cache_size == 3  # user + email + name
+
+
+def test_cache_is_bounded(py_engine):
+    from slpy.masking import _DECISION_CACHE_MAX
+
+    for i in range(_DECISION_CACHE_MAX + 50):
+        py_engine.process({f"field_{i}": "v"})
+    assert py_engine.decision_cache_size == _DECISION_CACHE_MAX
+    # A brand-new sensitive key AFTER the cap still masks (pays the scan, uncached).
+    result = py_engine.process({"brand_new_password_key": "hunter2"})
+    assert result["brand_new_password_key"] == "*******"
+    assert py_engine.decision_cache_size == _DECISION_CACHE_MAX
+
+
+def test_cache_invalidated_by_add_rule(py_engine):
+    # First pass: 'cuit' matches no rule → cached as "no rule", value untouched.
+    assert py_engine.process({"cuit": "20-12345678-9"})["cuit"] == "20-12345678-9"
+    py_engine.add_rule(
+        MaskingRule(pattern=r"cuit", strategy=MaskingStrategy.TOKEN, mask_char="#")
+    )
+    py_engine._native = None  # add_rule may rebuild native wiring; stay on Python
+    # Same key after add_rule: the stale "no rule" decision must NOT survive.
+    assert py_engine.process({"cuit": "20-12345678-9"})["cuit"] == "#" * len("20-12345678-9")
+
+
+def test_cache_keyed_on_truncated_name(py_engine):
+    from slpy.masking import _MAX_KEY_LEN
+
+    # Two over-long keys sharing the first 256 chars are one decision — the same
+    # truncated name the scan itself uses, so this is deterministic by construction.
+    base = "a" * _MAX_KEY_LEN
+    py_engine.process({base + "_one": "v1"})
+    py_engine.process({base + "_two": "v2"})
+    assert py_engine.decision_cache_size == 1

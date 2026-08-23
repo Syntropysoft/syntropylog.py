@@ -22,6 +22,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from ._regex_safety import assert_safe_key_pattern
+
 # ---------------------------------------------------------------------------
 # Native addon — loaded once, used transparently
 # ---------------------------------------------------------------------------
@@ -53,6 +55,12 @@ class MaskingRule:
     mask_char: str = "*"
 
     def __post_init__(self) -> None:
+        # ReDoS defense happens HERE, at rule construction — not on the log hot path.
+        # CPython's `re` cannot be interrupted mid-match (no timeout exists), so an
+        # explosive pattern is rejected before it can ever run; the 256-char key cap
+        # alone does NOT bound a nested quantifier (measured: (a+)+$ hangs at 40 chars).
+        # Default rules are known-safe alternations and pass trivially.
+        assert_safe_key_pattern(self.pattern)
         self._compiled = re.compile(self.pattern, re.IGNORECASE)
 
 
@@ -97,6 +105,14 @@ _DEFAULT_RULES: List[MaskingRule] = [
 # ReDoS guard: rules only ever run against field NAMES (never values), and the
 # name itself is capped — bounded input means bounded regex evaluation.
 _MAX_KEY_LEN = 256
+
+# Cap for the per-key-name decision cache. Bounded so attacker-controlled key
+# names (a hostile payload generating unique keys per log) cannot grow memory:
+# past the cap, new keys still mask correctly — they just pay the scan, uncached.
+_DECISION_CACHE_MAX = 4096
+
+# Cache-miss sentinel: a cached decision can legitimately be None ("no rule").
+_MISS = object()
 
 # Replacement for a container that still hides under a sensitive key when the
 # depth budget runs out — fixed width so nothing about the value leaks.
@@ -150,13 +166,38 @@ def _apply_strategy(value: str, rule: MaskingRule) -> str:
 # Tree walk — pure functions
 # ---------------------------------------------------------------------------
 
-def _find_rule(key: Any, rules: List[MaskingRule]) -> Optional[MaskingRule]:
-    """First rule whose pattern matches the field name, or None."""
-    name = str(key)[:_MAX_KEY_LEN]
+def _scan_rules(name: str, rules: List[MaskingRule]) -> Optional[MaskingRule]:
+    """The uncached scan: every rule, in order. Pure — depends only on name + rules."""
     for rule in rules:
         if rule._compiled.search(name):
             return rule
     return None
+
+
+def _find_rule(
+    key: Any,
+    rules: List[MaskingRule],
+    cache: Dict[str, Optional[MaskingRule]],
+) -> Optional[MaskingRule]:
+    """First rule whose pattern matches the field name (first match wins), served
+    from the bounded decision cache when the key name has been seen before.
+
+    Field NAMES repeat across log entries while values change, and the scan runs
+    every rule regex per key — so caching the decision (rule-or-None, never the
+    value) removes the whole scan from the hot path. Family fix (found by the
+    Java port's JMH suite). The cache is keyed on the truncated name — the same
+    name the decision is computed from — so it is deterministic by construction,
+    and slpy's nested keys are covered because the walk calls this per key at
+    every depth. The caller owns the cache (explicit parameter, no module state)
+    and must invalidate it when the rule set changes."""
+    name = str(key)[:_MAX_KEY_LEN]
+    hit = cache.get(name, _MISS)
+    if hit is not _MISS:
+        return hit  # type: ignore[return-value]  # None here means cached "no rule"
+    found = _scan_rules(name, rules)
+    if len(cache) < _DECISION_CACHE_MAX:
+        cache[name] = found
+    return found
 
 
 def _mask_leaf(value: Any, rule: MaskingRule) -> Any:
@@ -169,7 +210,13 @@ def _mask_leaf(value: Any, rule: MaskingRule) -> Any:
     return _apply_strategy(text, rule)
 
 
-def _mask_tree(value: Any, rules: List[MaskingRule], active: Optional[MaskingRule], depth: int) -> Any:
+def _mask_tree(
+    value: Any,
+    rules: List[MaskingRule],
+    active: Optional[MaskingRule],
+    depth: int,
+    cache: Dict[str, Optional[MaskingRule]],
+) -> Any:
     """Recursively mask a structure. `active` is the rule inherited from the
     closest matching ancestor key — everything beneath a sensitive key is
     masked. A deeper key matching its own rule overrides the inherited one."""
@@ -179,11 +226,11 @@ def _mask_tree(value: Any, rules: List[MaskingRule], active: Optional[MaskingRul
         return active.mask_char * _EXHAUSTED_MASK_LEN
     if isinstance(value, dict):
         return {
-            k: _mask_tree(v, rules, _find_rule(k, rules) or active, depth - 1)
+            k: _mask_tree(v, rules, _find_rule(k, rules, cache) or active, depth - 1, cache)
             for k, v in value.items()
         }
     if isinstance(value, (list, tuple)):
-        return [_mask_tree(v, rules, active, depth - 1) for v in value]
+        return [_mask_tree(v, rules, active, depth - 1, cache) for v in value]
     if active is None:
         return value
     return _mask_leaf(value, active)
@@ -232,6 +279,11 @@ class MaskingEngine:
         self._max_depth = max_depth
         self._on_error = on_masking_error
         self.failures = 0  # read by slpy.get_stats()
+        # Per-key-name decision cache: truncated name → rule (or None for "no
+        # rule"). Owned by the engine because the decision depends on its rule
+        # set; invalidated whenever that set changes (add_rule). Bounded — see
+        # _DECISION_CACHE_MAX.
+        self._decision_cache: Dict[str, Optional[MaskingRule]] = {}
 
         self._native = self._build_native(enable_default_rules, extra_rules or [], max_depth)
 
@@ -240,9 +292,18 @@ class MaskingEngine:
         """True if the Rust addon is active."""
         return self._native is not None
 
+    @property
+    def decision_cache_size(self) -> int:
+        """Entries currently held by the per-key-name decision cache."""
+        return len(self._decision_cache)
+
     def add_rule(self, rule: MaskingRule) -> None:
         """Append a rule at runtime — applied by both engines."""
         self._rules.append(rule)
+        # A new rule can only change the decision for names cached as "no rule"
+        # (first-match-wins keeps existing matches valid), but clearing everything
+        # is the simple, obviously-correct move — add_rule is config-time.
+        self._decision_cache.clear()
         if self._native is None:
             return
         if rule.custom_mask is not None:
@@ -263,7 +324,7 @@ class MaskingEngine:
             except Exception:
                 pass  # fall through to the Python engine
         try:
-            return _mask_tree(data, self._rules, None, self._max_depth)
+            return _mask_tree(data, self._rules, None, self._max_depth, self._decision_cache)
         except Exception as exc:
             self._report(exc)
             return _safe_payload(data)
