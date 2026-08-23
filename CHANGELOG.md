@@ -4,7 +4,15 @@ All notable changes to slpy are documented here.
 
 ---
 
-## [Unreleased]
+## [1.1.0] — 2026-08-23
+
+Two fixes that were sitting unreleased: masking got 3.3x faster on the Python engine, and
+explosive custom key patterns are now rejected when the rule is built. Both are additive — no API
+changes, no behaviour changes for any rule that was already valid.
+
+Released ahead of 2.0.0 on purpose. 2.0.0 changes what a masked value looks like, so anyone who
+asserts on log output will want to pin `<2.0.0` for a while; this release means that pin does not
+also cost them the ReDoS hardening and the performance work.
 
 ### Performance
 
