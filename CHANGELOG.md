@@ -4,15 +4,17 @@ All notable changes to slpy are documented here.
 
 ---
 
-## [1.1.0] — 2026-08-23
+## [2.0.0] — 2026-08-23
 
-Two fixes that were sitting unreleased: masking got 3.3x faster on the Python engine, and
-explosive custom key patterns are now rejected when the rule is built. Both are additive — no API
-changes, no behaviour changes for any rule that was already valid.
+slpy joins the family's masking contract, gains the retention model the Node reference shipped in
+2.x, and lets one sink see the values unmasked. Three breaking changes, all of them about output
+rather than API — the migration notes are in the sections below.
 
-Released ahead of 2.0.0 on purpose. 2.0.0 changes what a masked value looks like, so anyone who
-asserts on log output will want to pin `<2.0.0` for a while; this release means that pin does not
-also cost them the ReDoS hardening and the performance work.
+> **If you installed 1.1.0, install 2.0.0 instead.** 1.1.0 was published from a tree that already
+> contained every change listed here, so it carries this release's breaking changes under a minor
+> version number. It should not be used and is being yanked. Nothing in 2.0.0 differs from what
+> that artifact contained; only the version number is honest. A `slpy-log<2` pin is safe again
+> once 1.1.0 is yanked, and resolves to 1.0.0.
 
 ### Added — `llms.txt`, and it is asserted rather than asserted-to
 
@@ -272,6 +274,17 @@ if you want a full mask with your own character.
   repo, and the masked output differs from the canon on all five built-in strategies. The
   corrected state, the measured divergence and the decision to adopt the canon in 2.0.0 are now
   recorded there. The header was also two versions stale (0.4.0, 158 tests).
+
+---
+
+## [1.1.0] — 2026-08-23 [YANKED]
+
+**Do not use.** Published from a tree that already contained the 2.0.0 breaking changes, so this
+version number promises a minor and delivers a major. Use 2.0.0.
+
+What this number was *meant* to carry is below — the two changes that were sitting unreleased when
+the 2.0.0 work started. If a consumer pinned to `<2` needs them, they ship as 1.1.1 from the
+`release/1.1.0` tree.
 
 ### Performance
 

@@ -289,3 +289,29 @@ def test_llms_txt_ships_in_the_sdist():
     root = pathlib.Path(slpy.__file__).parent.parent
     assert (root / "llms.txt").is_file()
     assert "include llms.txt" in (root / "MANIFEST.in").read_text()
+
+
+def test_the_version_is_the_same_in_both_places():
+    """`pyproject.toml` is what the build stamps on the artifact; `__version__` is
+    what the running program reports, and `setup.py` reads it. Move one without the
+    other and the wheel says one number while `slpy.__version__` says another —
+    silently, because nothing imports the manifest at runtime.
+    """
+    root = pathlib.Path(slpy.__file__).parent.parent
+    declared = re.search(r'^version = "([^"]+)"', (root / "pyproject.toml").read_text(),
+                         re.MULTILINE).group(1)
+    assert slpy.__version__ == declared
+
+
+def test_every_python_ci_runs_is_declared_as_a_classifier():
+    """The `pyversions` badge is generated from these, so a version CI tests and
+    the manifest omits becomes a README that undersells the package."""
+    root = pathlib.Path(slpy.__file__).parent.parent
+    classifiers = re.findall(r"Programming Language :: Python :: (\d+\.\d+)",
+                             (root / "pyproject.toml").read_text())
+    ci = re.search(r'python-version: \[([^\]]+)\]',
+                   (root / ".github/workflows/ci.yml").read_text()).group(1)
+    tested = re.findall(r'"(\d+\.\d+)"', ci)
+    assert set(tested) <= set(classifiers), (
+        "CI tests %s which is not declared as a classifier" % (set(tested) - set(classifiers))
+    )

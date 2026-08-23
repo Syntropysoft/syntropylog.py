@@ -3,21 +3,28 @@
 # file at all; this adds the scheduled version updates the alerts do not cover, and
 # the two ecosystems the repo actually ships: the Rust addon and the workflows.
 version: 2
+# Every update targets `develop`, not the default branch. Work lands on develop and
+# main is promoted by PR; a bot PR merging straight into main contradicts that — and
+# on 2026-08-23 an unrelated merge moving main's tip between a merge and its tag is
+# exactly how v1.1.0 ended up on the wrong tree.
 updates:
   - package-ecosystem: cargo
     directory: /slpy-native
     schedule:
       interval: weekly
+    target-branch: develop
     open-pull-requests-limit: 5
 
   - package-ecosystem: pip
     directory: /
     schedule:
       interval: weekly
+    target-branch: develop
     open-pull-requests-limit: 5
 
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+    target-branch: develop
     open-pull-requests-limit: 5
