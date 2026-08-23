@@ -12,9 +12,10 @@
 
 <p align="center">
   <a href="https://pypi.org/project/slpy-log/"><img src="https://img.shields.io/pypi/v/slpy-log.svg" alt="PyPI Version"></a>
+  <a href="https://github.com/Syntropysoft/syntropylog.py/actions/workflows/ci.yml"><img src="https://github.com/Syntropysoft/syntropylog.py/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
+  <a href="https://pypi.org/project/slpy-log/"><img src="https://img.shields.io/pypi/pyversions/slpy-log.svg" alt="Supported Python versions"></a>
   <a href="https://github.com/Syntropysoft/syntropylog.py/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg" alt="License"></a>
-  <a href="#"><img src="https://img.shields.io/badge/python-3.7+-blue.svg" alt="Python 3.7+"></a>
-  <a href="#"><img src="https://img.shields.io/badge/dependencies-zero-brightgreen.svg" alt="Zero dependencies"></a>
+  <a href="#security--supply-chain"><img src="https://img.shields.io/badge/dependencies-zero-brightgreen.svg" alt="Zero runtime dependencies"></a>
 </p>
 
 <p align="center">
