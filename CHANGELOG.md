@@ -6,6 +6,55 @@ All notable changes to slpy are documented here.
 
 ## [Unreleased]
 
+### Added — internal
+
+- **The gate runs on every push, and the engine-drift lock finally runs at all.** There was no CI
+  workflow on push or pull request: `publish.yml` ran the suite only on a version tag and
+  `benchmark.yml` never called pytest. Worse, the 14 tests that compare the Rust and Python
+  masking engines — the regression lock against the bug family that hit SyntropyLog (Node) #2,
+  two engines drifting until one leaks PII — could not run in either, because the one workflow
+  that builds the addon does not test and the one that tests does not build it. They were built
+  and run locally for this release: they pass. Coverage was never the problem; execution was.
+
+  `ci.yml` adds three jobs. `test` runs the suite on 3.9/3.11/3.12/3.13. `parity-native` builds
+  `slpy-native` with maturin, installs every optional dependency, and **fails if any test is
+  skipped** — with all of them present, a skip means a control did not run. `floor` runs on
+  CPython **3.7**, the version `requires-python` has always declared and nothing ever verified
+  (the publish matrix starts at 3.9); it needs `ubuntu-22.04`, the last runner that provides it,
+  and was confirmed green at 3.7.17 before the job was written.
+
+- **The same gate as git hooks** (`.githooks/`, enabled with
+  `git config core.hooksPath .githooks`). pre-commit refuses a commit on `main` and runs the
+  suite; pre-push runs it and says out loud which optional dependency is missing and therefore
+  which control did not run — silence there is how the parity lock stayed dormant for a year.
+  Every path was verified by making it fail — on `main`, with no pytest available, and on a
+  deliberately broken tree — not only by watching it pass on a clean one. Note for anyone with a
+  global `core.hooksPath`: the repo-level setting overrides it, so the refuse-on-`main` guard is
+  replicated inside this repo's hook rather than assumed from outside.
+
+### Fixed — internal
+
+- **pytest was configured in two places and one of them was dead.** `pytest.ini` and
+  `[tool.pytest.ini_options]` in `pyproject.toml` declared the same two settings; `pytest.ini`
+  wins, so edits to the other had no effect and nothing said so. The dead block is gone and
+  `pytest.ini` says why it is the only one.
+
+- **Three documents described a library that does not exist.** `docs/data_masking.md`,
+  `docs/lifecycle.md` and `docs/logger_matrix.md` predate the slpy refactor and document eleven
+  facade methods that were never in the shipped package (`add_masking_rule`, `mask_data`,
+  `get_masking_stats`, `add_shutdown_handler`, `get_status`, `add_context`,
+  `add_context_with_matrix`, `configure_logger_matrix`, and module-level `info`/`debug`/`error`),
+  a flatten/unflatten architecture the engine does not use, and masked values it does not
+  produce. Each now opens with what is wrong and where the accurate answer is; the rewrite is
+  tracked in `PARITY-ROADMAP.md`.
+
+- **`PARITY-ROADMAP.md` claimed a parity slpy does not have.** It stated that masking was
+  `MaskSpec`-based and asserted the shared 17-case `mask-parity-cases.json` "same contract as
+  JS/Rust/JVM". Neither is true: there is no `MaskSpec` in `slpy/`, no copy of that fixture in the
+  repo, and the masked output differs from the canon on all five built-in strategies. The
+  corrected state, the measured divergence and the decision to adopt the canon in 2.0.0 are now
+  recorded there. The header was also two versions stale (0.4.0, 158 tests).
+
 ### Performance
 
 - **Masking is 3.3x faster in the Python engine (5,576 → 1,697 ns/op) via a bounded

@@ -1,5 +1,15 @@
 # SyntropyLog Python - Lifecycle Management
 
+> ⚠️ **Stale — this document predates the slpy refactor and does not describe the shipped library.**
+>
+> It documents a facade that does not exist (`syntropy_log.add_shutdown_handler`,
+> `syntropy_log.get_status`, module-level `syntropy_log.info`). The real lifecycle is
+> `await slpy.init(config)` → `slpy.get_logger(name)` → `await slpy.shutdown()`, with
+> `slpy.is_initialized` as the only status accessor (`slpy/core.py`).
+>
+> Rewrite tracked in `PARITY-ROADMAP.md`.
+
+
 ## 🎯 Overview
 
 El ciclo de vida del framework SyntropyLog Python está diseñado para manejar **singletons de recursos pesados** de manera segura, asegurando que todos los recursos se liberen correctamente durante el shutdown graceful.
